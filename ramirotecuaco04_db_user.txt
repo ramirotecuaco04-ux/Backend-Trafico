@@ -1,0 +1,7 @@
+ramirotecuaco04_db_user
+
+
+Q8jKGJodnwnvaGny
+
+
+mongodb+srv://ramirotecuaco04_db_user:Q8jKGJodnwnvaGny@examen1.smd2arh.mongodb.net/?appName=Examen1
