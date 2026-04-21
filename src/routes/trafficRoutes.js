@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const Traffic = require("../models/TrafficModel");
+const Traffic = require("../models/Traffic");
 
 // GET todos los registros
 router.get("/", async (req, res) => {

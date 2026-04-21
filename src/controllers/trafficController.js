@@ -1,18 +1,26 @@
-const trafficService = require("../services/trafficService");
+const Traffic = require("../models/Traffic");
 
-let io; // socket.io instance
+let io;
 
 function setSocket(socketInstance){
   io = socketInstance;
 }
 
-async function createTraffic(req,res){
+// ESTE ES EL ENDPOINT DE LA JETSON
+async function fromJetson(req, res){
   try{
     const data = req.body;
-    const saved = await trafficService.saveTraffic(data);
 
+    const saved = await Traffic.create(data);
+
+    //  EMITIR DECISIÓN
     if(io){
-      io.emit("traffic-update", saved); // envía actualización en tiempo real
+      io.emit("traffic-decision", {
+        intersection: data.intersection_id,
+        decision: data.decision,
+        vehicles: data.vehicle_count,
+        pedestrians: data.pedestrian_count
+      });
     }
 
     res.json(saved);
@@ -22,12 +30,8 @@ async function createTraffic(req,res){
 }
 
 async function getTraffic(req,res){
-  try{
-    const data = await trafficService.getTraffic();
-    res.json(data);
-  }catch(err){
-    res.status(500).json({ error: err.message });
-  }
+  const data = await Traffic.find().sort({ timestamp: -1 }).limit(50);
+  res.json(data);
 }
 
-module.exports = { createTraffic, getTraffic, setSocket };
+module.exports = { fromJetson, getTraffic, setSocket };
