@@ -1,5 +1,5 @@
 const User = require("../models/User");
-const { sendSuccess } = require("../utils/http");
+const { createHttpError, sendSuccess } = require("../utils/http");
 const { normalizeTrimmedString } = require("../utils/validation");
 
 function normalizeSyncPayload(payload = {}) {
@@ -32,7 +32,24 @@ function resolveRoleForUid(uid) {
     return "admin";
   }
 
-  return process.env.DEFAULT_FIREBASE_ROLE || "admin";
+  return null;
+}
+
+function toSessionUser(user) {
+  if (!user) {
+    return null;
+  }
+
+  return {
+    _id: user._id,
+    nombre: user.nombre,
+    email: user.email,
+    rol: user.rol,
+    estado: user.estado,
+    firebase_uid: user.firebase_uid,
+    siren_enabled: user.siren_enabled,
+    assigned_intersections: user.assigned_intersections || []
+  };
 }
 
 async function syncCurrentUser(req, res, next) {
@@ -45,11 +62,20 @@ async function syncCurrentUser(req, res, next) {
     let user = await User.findOne({ firebase_uid: firebaseUid });
 
     if (!user) {
+      const role = resolveRoleForUid(firebaseUid);
+
+      if (!role) {
+        throw createHttpError(
+          "Usuario no autorizado. Debe ser registrado por un administrador antes de iniciar sesion.",
+          403
+        );
+      }
+
       user = await User.create({
         firebase_uid: firebaseUid,
         email,
         nombre,
-        rol: resolveRoleForUid(firebaseUid),
+        rol: role,
         ubicacion: payload.ubicacion,
         siren_enabled: payload.siren_enabled || false,
         last_login_at: new Date(),
@@ -69,7 +95,7 @@ async function syncCurrentUser(req, res, next) {
 
     sendSuccess(res, {
       auth: req.auth,
-      user
+      user: toSessionUser(user)
     });
   } catch (error) {
     next(error);
@@ -80,7 +106,7 @@ async function getCurrentSession(req, res, next) {
   try {
     sendSuccess(res, {
       auth: req.auth,
-      user: req.currentUser
+      user: toSessionUser(req.currentUser)
     });
   } catch (error) {
     next(error);
@@ -106,7 +132,7 @@ async function updatePresence(req, res, next) {
     req.currentUser.last_seen_at = new Date();
     await req.currentUser.save();
 
-    sendSuccess(res, req.currentUser);
+    sendSuccess(res, toSessionUser(req.currentUser));
   } catch (error) {
     next(error);
   }
