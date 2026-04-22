@@ -1,30 +1,26 @@
 const express = require("express");
+const {
+  createTraffic,
+  getJetsonHeartbeatById,
+  getJetsonHeartbeats,
+  getTrafficById,
+  getTrafficMetrics,
+  getTrafficSummary,
+  listTraffic,
+  registerJetsonHeartbeat
+} = require("../controllers/trafficController");
+const { requireAuth, requireJetsonKey, requireRole } = require("../middleware/auth");
+
 const router = express.Router();
-const Traffic = require("../models/Traffic");
 
-// GET todos los registros
-router.get("/", async (req, res) => {
-  try {
-    const data = await Traffic.find();
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
-// POST nuevo registro
-router.post("/", async (req, res) => {
-  const { intersection_id, vehicle_count, density } = req.body;
-  const traffic = new Traffic({ intersection_id, vehicle_count, density });
-
-  try {
-    const saved = await traffic.save();
-    // Emitir en tiempo real via Socket.io
-    req.io.emit("new_traffic", saved);
-    res.status(201).json(saved);
-  } catch (err) {
-    res.status(400).json({ message: err.message });
-  }
-});
+router.get("/", requireAuth, requireRole("admin"), listTraffic);
+router.get("/metrics", requireAuth, requireRole("admin"), getTrafficMetrics);
+router.get("/summary", requireAuth, requireRole("admin"), getTrafficSummary);
+router.get("/heartbeats", requireAuth, requireRole("admin"), getJetsonHeartbeats);
+router.get("/heartbeats/:id", requireAuth, requireRole("admin"), getJetsonHeartbeatById);
+router.get("/:id", requireAuth, requireRole("admin"), getTrafficById);
+router.post("/", requireAuth, requireRole("admin"), createTraffic);
+router.post("/jetson", requireJetsonKey, createTraffic);
+router.post("/jetson/heartbeat", requireJetsonKey, registerJetsonHeartbeat);
 
 module.exports = router;

@@ -1,4 +1,4 @@
-const Traffic = require("../models/trafficModel");
+const Traffic = require("../models/Traffic");
 
 async function saveTraffic(data){
   const traffic = new Traffic(data);

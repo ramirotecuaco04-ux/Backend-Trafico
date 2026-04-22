@@ -1,12 +1,12 @@
 const mongoose = require("mongoose");
 
 const trafficSchema = new mongoose.Schema({
-  intersection_id: { type: String, required: true },
-  vehicle_count: Number,
-  pedestrian_count: Number, // 🔥 NUEVO
-  density: String,
-  decision: String, // 🔥 NUEVO (GREEN_A, PEDESTRIAN, etc)
-  camera_id: String,
+  intersection_id: { type: String, required: true, trim: true },
+  vehicle_count: { type: Number, default: 0, min: 0 },
+  pedestrian_count: { type: Number, default: 0, min: 0 },
+  density: { type: String, trim: true, default: "medium" },
+  decision: { type: String, trim: true, default: null },
+  camera_id: { type: String, trim: true, default: null },
   timestamp: { type: Date, default: Date.now }
 });
 
