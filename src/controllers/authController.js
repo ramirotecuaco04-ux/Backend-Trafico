@@ -99,10 +99,7 @@ async function syncCurrentUser(req, res, next) {
       await user.save();
     }
 
-    sendSuccess(res, {
-      auth: req.auth,
-      user: toSessionUser(user)
-    });
+    sendSuccess(res, toSessionUser(user));
   } catch (error) {
     next(error);
   }
