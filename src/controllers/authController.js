@@ -82,6 +82,12 @@ async function syncCurrentUser(req, res, next) {
         last_seen_at: new Date()
       });
     } else {
+      // Verificar y actualizar rol en cada login
+      const adminRole = resolveRoleForUid(firebaseUid);
+      if (adminRole) {
+        user.rol = adminRole;
+      }
+      
       if (payload.nombre !== undefined) user.nombre = nombre;
       if (email !== undefined) user.email = email;
       if (payload.ubicacion !== undefined) user.ubicacion = payload.ubicacion;
