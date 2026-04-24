@@ -9,6 +9,7 @@ const authRoutes = require("./routes/authRoutes");
 const dashboardRoutes = require("./routes/dashboardRoutes");
 const messageRoutes = require("./routes/messageRoutes");
 const semaphoreRoutes = require("./routes/semaphoreRoutes");
+const uploadRoutes = require("./routes/uploadRoutes");
 const { requireAuth } = require("./middleware/auth");
 
 function createApp() {
@@ -44,6 +45,7 @@ function createApp() {
   app.use("/api/users", requireAuth, userRoutes);
   app.use("/api/messages", requireAuth, messageRoutes);
   app.use("/api/semaphores", requireAuth, semaphoreRoutes);
+  app.use("/api/uploads", requireAuth, uploadRoutes);
 
   app.use((req, res) => {
     res.status(404).json({

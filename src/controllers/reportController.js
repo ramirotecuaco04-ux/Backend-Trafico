@@ -46,12 +46,50 @@ function normalizeReportPayload(payload = {}, { partial = false } = {}) {
     normalized.metadata = payload.metadata || {};
   }
 
+  if (payload.fotos !== undefined) {
+    if (!Array.isArray(payload.fotos)) {
+      throw createHttpError("fotos debe ser un arreglo");
+    }
+
+    normalized.fotos = payload.fotos
+      .filter(Boolean)
+      .map((photo, index) => {
+        if (!photo.url && !photo.secure_url) {
+          throw createHttpError(`La foto ${index + 1} requiere url o secure_url`);
+        }
+
+        return {
+          url: String(photo.url || photo.secure_url).trim(),
+          secure_url: photo.secure_url ? String(photo.secure_url).trim() : null,
+          public_id: photo.public_id ? String(photo.public_id).trim() : null,
+          asset_id: photo.asset_id ? String(photo.asset_id).trim() : null,
+          filename: photo.filename ? String(photo.filename).trim() : null,
+          content_type: photo.content_type ? String(photo.content_type).trim() : null,
+          width: photo.width ? Number(photo.width) : null,
+          height: photo.height ? Number(photo.height) : null,
+          uploaded_at: photo.uploaded_at ? new Date(photo.uploaded_at) : new Date()
+        };
+      });
+  }
+
   return normalized;
 }
 
 async function createReport(req, res, next) {
   try {
-    const report = await Report.create(normalizeReportPayload(req.body));
+    const payload = normalizeReportPayload(req.body);
+    const report = await Report.create({
+      ...payload,
+      creado_por: req.currentUser?._id || null,
+      reportado_por_nombre: req.currentUser?.nombre || null,
+      reportado_por_uid: req.currentUser?.firebase_uid || null,
+      reportado_en: new Date(),
+      metadata: {
+        ...payload.metadata,
+        reportado_por_rol: req.currentUser?.rol || null,
+        email_reportante: req.currentUser?.email || null
+      }
+    });
     sendSuccess(res, report, undefined, 201);
   } catch (error) {
     next(error);
@@ -82,6 +120,10 @@ async function getReports(req, res, next) {
 
     if (req.query.prioridad) {
       query.prioridad = String(req.query.prioridad).trim();
+    }
+
+    if (req.query.reportado_por_uid) {
+      query.reportado_por_uid = String(req.query.reportado_por_uid).trim();
     }
 
     if (startDate || endDate) {
@@ -135,6 +177,11 @@ async function getReportById(req, res, next) {
 async function updateReport(req, res, next) {
   try {
     const payload = normalizeReportPayload(req.body, { partial: true });
+    delete payload.reportado_por_nombre;
+    delete payload.reportado_por_uid;
+    delete payload.reportado_en;
+    delete payload.creado_por;
+
     const report = await Report.findByIdAndUpdate(
       req.params.id,
       payload,
