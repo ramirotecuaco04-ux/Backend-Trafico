@@ -107,10 +107,7 @@ async function syncCurrentUser(req, res, next) {
 
 async function getCurrentSession(req, res, next) {
   try {
-    sendSuccess(res, {
-      auth: req.auth,
-      user: toSessionUser(req.currentUser)
-    });
+    sendSuccess(res, toSessionUser(req.currentUser));
   } catch (error) {
     next(error);
   }
