@@ -1,5 +1,6 @@
 const User = require("../models/User");
 const { createHttpError, sendSuccess } = require("../utils/http");
+const { getFirebaseAdmin } = require("../config/firebase");
 const {
   normalizeLimit,
   normalizePage,
@@ -19,6 +20,10 @@ function normalizeUserPayload(payload = {}, { partial = false } = {}) {
     normalized.email = payload.email
       ? normalizeTrimmedString(payload.email, "email")
       : null;
+  }
+
+  if (payload.password !== undefined) {
+    normalized.password = normalizeTrimmedString(payload.password, "password", { required: !partial });
   }
 
   if (payload.firebase_uid !== undefined) {
@@ -59,7 +64,49 @@ function normalizeUserPayload(payload = {}, { partial = false } = {}) {
 
 async function createUser(req, res, next) {
   try {
-    const user = await User.create(normalizeUserPayload(req.body));
+    const payload = normalizeUserPayload(req.body);
+    
+    if (!payload.email) {
+      throw createHttpError("Correo es obligatorio", 400);
+    }
+    
+    if (!payload.password) {
+      throw createHttpError("Contraseña es obligatoria", 400);
+    }
+
+    // Crear usuario en Firebase
+    const admin = getFirebaseAdmin();
+    if (!admin) {
+      throw createHttpError("Firebase no esta configurado en el backend", 500);
+    }
+
+    let firebaseUid;
+    try {
+      const userRecord = await admin.auth().createUser({
+        email: payload.email,
+        password: payload.password,
+        displayName: payload.nombre
+      });
+      firebaseUid = userRecord.uid;
+    } catch (firebaseError) {
+      if (firebaseError.code === 'auth/email-already-exists') {
+        throw createHttpError("El correo ya está registrado en Firebase", 400);
+      }
+      throw createHttpError(`Error en Firebase: ${firebaseError.message}`, 400);
+    }
+
+    // Crear usuario en MongoDB
+    const userData = {
+      nombre: payload.nombre,
+      email: payload.email,
+      rol: payload.rol,
+      firebase_uid: firebaseUid,
+      estado: "activo",
+      siren_enabled: false,
+      assigned_intersections: payload.assigned_intersections || []
+    };
+
+    const user = await User.create(userData);
     sendSuccess(res, user, undefined, 201);
   } catch (error) {
     next(error);
