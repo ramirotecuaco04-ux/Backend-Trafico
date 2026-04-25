@@ -190,15 +190,34 @@ async function updateUser(req, res, next) {
 async function deleteUser(req, res, next) {
   try {
     validateObjectId(req.params.id, "user id");
-    const user = await User.findByIdAndDelete(req.params.id);
+    
+    // Primero obtén el usuario para conseguir su firebase_uid
+    const user = await User.findById(req.params.id);
 
     if (!user) {
       throw createHttpError("Usuario no encontrado", 404);
     }
 
+    // Si tiene firebase_uid, elimínalo de Firebase
+    if (user.firebase_uid) {
+      try {
+        const admin = getFirebaseAdmin();
+        if (admin) {
+          await admin.auth().deleteUser(user.firebase_uid);
+        }
+      } catch (firebaseError) {
+        // Log pero no falla si Firebase no lo encuentra
+        console.warn(`No se pudo eliminar de Firebase: ${firebaseError.message}`);
+      }
+    }
+
+    // Luego elimínalo de MongoDB
+    await User.findByIdAndDelete(req.params.id);
+
     sendSuccess(res, {
       deleted: true,
-      user_id: req.params.id
+      user_id: req.params.id,
+      firebase_uid: user.firebase_uid
     });
   } catch (error) {
     next(error);
