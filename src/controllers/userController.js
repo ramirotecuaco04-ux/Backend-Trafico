@@ -171,15 +171,34 @@ async function getUserById(req, res, next) {
 
 async function updateUser(req, res, next) {
   try {
+    validateObjectId(req.params.id, "user id");
+    
+    // Primero obtén el usuario actual
+    const currentUser = await User.findById(req.params.id);
+    if (!currentUser) {
+      throw createHttpError("Usuario no encontrado", 404);
+    }
+
+    // Si se está actualizando la contraseña y el usuario tiene firebase_uid
+    if (req.body.password && currentUser.firebase_uid) {
+      try {
+        const admin = getFirebaseAdmin();
+        if (admin) {
+          await admin.auth().updateUser(currentUser.firebase_uid, {
+            password: req.body.password
+          });
+        }
+      } catch (firebaseError) {
+        throw createHttpError(`Error actualizando contraseña en Firebase: ${firebaseError.message}`, 400);
+      }
+    }
+
+    // Luego actualiza en MongoDB
     const user = await User.findByIdAndUpdate(
       req.params.id,
       normalizeUserPayload(req.body, { partial: true }),
       { new: true, runValidators: true }
     );
-
-    if (!user) {
-      throw createHttpError("Usuario no encontrado", 404);
-    }
 
     sendSuccess(res, user);
   } catch (error) {
