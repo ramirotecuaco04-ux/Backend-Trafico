@@ -23,15 +23,45 @@ function normalizeReportPayload(payload = {}, { partial = false } = {}) {
   }
 
   if (payload.tipo !== undefined) {
-    normalized.tipo = String(payload.tipo).trim();
+    const tipo = String(payload.tipo).trim().toLowerCase();
+    const tipoMap = {
+      incidente: "incidente",
+      infraestructura: "mantenimiento",
+      mantenimiento: "mantenimiento",
+      operacion: "operacion",
+      operativa: "operacion",
+      sistema: "sistema",
+      otro: "operacion"
+    };
+    normalized.tipo = tipoMap[tipo] || tipo;
   }
 
   if (payload.estado !== undefined) {
-    normalized.estado = String(payload.estado).trim();
+    const estado = String(payload.estado).trim().toLowerCase();
+    const estadoMap = {
+      nuevo: "abierto",
+      abierta: "abierto",
+      abierto: "abierto",
+      en_proceso: "en_proceso",
+      enproceso: "en_proceso",
+      cerrado: "cerrado",
+      cerrada: "cerrado"
+    };
+    normalized.estado = estadoMap[estado] || estado;
   }
 
   if (payload.prioridad !== undefined) {
-    normalized.prioridad = String(payload.prioridad).trim();
+    const prioridad = String(payload.prioridad).trim().toLowerCase();
+    const prioridadMap = {
+      baja: "baja",
+      media: "media",
+      normal: "media",
+      alta: "alta",
+      critica: "critica",
+      crítico: "critica",
+      critical: "critica"
+    };
+    normalized.prioridad = prioridadMap[prioridad] || prioridad;
   }
 
   if (payload.intersection_id !== undefined) {
@@ -115,6 +145,9 @@ async function createReport(req, res, next) {
     });
     sendSuccess(res, toReportResponse(report), undefined, 201);
   } catch (error) {
+    if (error?.name === "ValidationError" && !error.status) {
+      error.status = 400;
+    }
     next(error);
   }
 }
@@ -217,6 +250,9 @@ async function updateReport(req, res, next) {
 
     sendSuccess(res, toReportResponse(report));
   } catch (error) {
+    if (error?.name === "ValidationError" && !error.status) {
+      error.status = 400;
+    }
     next(error);
   }
 }
