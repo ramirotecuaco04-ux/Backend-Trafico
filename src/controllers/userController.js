@@ -9,6 +9,21 @@ const {
   validateObjectId
 } = require("../utils/validation");
 
+function toUserResponse(user) {
+  if (!user) {
+    return user;
+  }
+
+  const raw = typeof user.toObject === "function" ? user.toObject() : { ...user };
+  return {
+    ...raw,
+    id: raw._id,
+    name: raw.nombre || "",
+    displayName: raw.nombre || "",
+    role: raw.rol || ""
+  };
+}
+
 function normalizeUserPayload(payload = {}, { partial = false } = {}) {
   const normalized = {};
 
@@ -107,7 +122,7 @@ async function createUser(req, res, next) {
     };
 
     const user = await User.create(userData);
-    sendSuccess(res, user, undefined, 201);
+    sendSuccess(res, toUserResponse(user), undefined, 201);
   } catch (error) {
     next(error);
   }
@@ -142,7 +157,7 @@ async function getUsers(req, res, next) {
       User.countDocuments(query)
     ]);
 
-    sendSuccess(res, users, {
+    sendSuccess(res, users.map(toUserResponse), {
       count: users.length,
       total,
       page,
@@ -163,7 +178,7 @@ async function getUserById(req, res, next) {
       throw createHttpError("Usuario no encontrado", 404);
     }
 
-    sendSuccess(res, user);
+    sendSuccess(res, toUserResponse(user));
   } catch (error) {
     next(error);
   }
@@ -200,7 +215,7 @@ async function updateUser(req, res, next) {
       { new: true, runValidators: true }
     );
 
-    sendSuccess(res, user);
+    sendSuccess(res, toUserResponse(user));
   } catch (error) {
     next(error);
   }

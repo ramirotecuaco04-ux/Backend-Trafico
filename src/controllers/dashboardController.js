@@ -149,8 +149,12 @@ async function getAdminDashboard(req, res, next) {
       latest_traffic: latestTraffic,
       users_summary: users.map((user) => ({
         _id: user._id,
+        id: user._id,
         nombre: user.nombre,
+        name: user.nombre,
+        displayName: user.nombre,
         rol: user.rol,
+        role: user.rol,
         estado: user.estado,
         last_seen_at: user.last_seen_at,
         ubicacion: user.ubicacion || null

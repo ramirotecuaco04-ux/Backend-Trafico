@@ -11,13 +11,15 @@ const {
 
 function normalizeReportPayload(payload = {}, { partial = false } = {}) {
   const normalized = {};
+  const incomingTitle = payload.titulo ?? payload.title ?? payload.name;
+  const incomingDescription = payload.descripcion ?? payload.description ?? payload.body;
 
-  if (!partial || payload.titulo !== undefined) {
-    normalized.titulo = normalizeTrimmedString(payload.titulo, "titulo", { required: true });
+  if (!partial || incomingTitle !== undefined) {
+    normalized.titulo = normalizeTrimmedString(incomingTitle, "titulo", { required: true });
   }
 
-  if (payload.descripcion !== undefined) {
-    normalized.descripcion = String(payload.descripcion || "").trim();
+  if (incomingDescription !== undefined) {
+    normalized.descripcion = String(incomingDescription || "").trim();
   }
 
   if (payload.tipo !== undefined) {
@@ -75,6 +77,27 @@ function normalizeReportPayload(payload = {}, { partial = false } = {}) {
   return normalized;
 }
 
+function toReportResponse(report) {
+  if (!report) {
+    return report;
+  }
+
+  const raw = typeof report.toObject === "function" ? report.toObject() : { ...report };
+  return {
+    ...raw,
+    id: raw._id,
+    title: raw.titulo || "",
+    name: raw.titulo || "",
+    description: raw.descripcion || "",
+    body: raw.descripcion || "",
+    status: raw.estado || "",
+    priority: raw.prioridad || "",
+    type: raw.tipo || "",
+    reporter_name: raw.reportado_por_nombre || "",
+    reporter_uid: raw.reportado_por_uid || ""
+  };
+}
+
 async function createReport(req, res, next) {
   try {
     const payload = normalizeReportPayload(req.body);
@@ -90,7 +113,7 @@ async function createReport(req, res, next) {
         email_reportante: req.currentUser?.email || null
       }
     });
-    sendSuccess(res, report, undefined, 201);
+    sendSuccess(res, toReportResponse(report), undefined, 201);
   } catch (error) {
     next(error);
   }
@@ -147,7 +170,7 @@ async function getReports(req, res, next) {
       Report.countDocuments(query)
     ]);
 
-    sendSuccess(res, data, {
+    sendSuccess(res, data.map(toReportResponse), {
       count: data.length,
       total,
       page,
@@ -168,7 +191,7 @@ async function getReportById(req, res, next) {
       throw createHttpError("Reporte no encontrado", 404);
     }
 
-    sendSuccess(res, report);
+    sendSuccess(res, toReportResponse(report));
   } catch (error) {
     next(error);
   }
@@ -192,7 +215,7 @@ async function updateReport(req, res, next) {
       throw createHttpError("Reporte no encontrado", 404);
     }
 
-    sendSuccess(res, report);
+    sendSuccess(res, toReportResponse(report));
   } catch (error) {
     next(error);
   }

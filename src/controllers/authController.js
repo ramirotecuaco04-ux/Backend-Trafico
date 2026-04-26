@@ -42,9 +42,13 @@ function toSessionUser(user) {
 
   return {
     _id: user._id,
+    id: user._id,
     nombre: user.nombre,
+    name: user.nombre,
+    displayName: user.nombre,
     email: user.email,
     rol: user.rol,
+    role: user.rol,
     estado: user.estado,
     firebase_uid: user.firebase_uid,
     siren_enabled: user.siren_enabled,
