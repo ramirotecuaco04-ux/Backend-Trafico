@@ -30,11 +30,12 @@ async function createCloudinaryReportSignature(req, res, next) {
     const timestamp = Math.floor(Date.now() / 1000);
     const folder = `traffic_reports/${intersectionId}`;
     const tags = ["traffic-report", req.currentUser.rol, intersectionId];
+    const tagsCsv = tags.join(",");
     const context = `reported_by=${req.currentUser.nombre}|reported_role=${req.currentUser.rol}`;
     const paramsToSign = {
       timestamp,
       folder,
-      tags: tags.join(","),
+      tags: tagsCsv,
       context
     };
 
@@ -45,7 +46,7 @@ async function createCloudinaryReportSignature(req, res, next) {
       api_key: cloudinary.apiKey,
       timestamp,
       folder,
-      tags,
+      tags: tagsCsv,
       context,
       signature
     });
