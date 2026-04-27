@@ -2,6 +2,11 @@ const mongoose = require("mongoose");
 
 const trafficSchema = new mongoose.Schema({
   intersection_id: { type: String, required: true, trim: true },
+  // Coordenadas para que Flutter pueda ubicar el semáforo en el mapa
+  ubicacion: {
+    lat: { type: Number, default: null },
+    lng: { type: Number, default: null }
+  },
   vehicle_count: { type: Number, default: 0, min: 0 },
   pedestrian_count: { type: Number, default: 0, min: 0 },
   density: { type: String, trim: true, default: "medium" },

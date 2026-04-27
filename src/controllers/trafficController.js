@@ -22,6 +22,19 @@ function normalizeTrafficPayload(payload = {}) {
     pedestrian_count: normalizeNonNegativeNumber(payload.pedestrian_count, "pedestrian_count")
   };
 
+  // Soporte para inyectar ubicación (lat/lng)
+  if (payload.lat !== undefined && payload.lng !== undefined) {
+    normalized.ubicacion = {
+      lat: Number(payload.lat),
+      lng: Number(payload.lng)
+    };
+  } else if (payload.ubicacion) {
+    normalized.ubicacion = {
+      lat: Number(payload.ubicacion.lat),
+      lng: Number(payload.ubicacion.lng)
+    };
+  }
+
   const density = normalizeTrimmedString(payload.density, "density");
   const decision = normalizeTrimmedString(payload.decision, "decision");
   const cameraId = normalizeTrimmedString(payload.camera_id, "camera_id");
@@ -48,7 +61,10 @@ function emitTraffic(io, record) {
     pedestrians: record.pedestrian_count,
     density: record.density,
     camera_id: record.camera_id,
-    timestamp: record.timestamp
+    timestamp: record.timestamp,
+    // Enviamos lat/lng en el evento de Socket.io también
+    lat: record.ubicacion?.lat || null,
+    lng: record.ubicacion?.lng || null
   });
 }
 
@@ -64,6 +80,7 @@ async function createTraffic(req, res, next) {
   }
 }
 
+// ... resto de funciones (listTraffic, getTrafficById, getTrafficSummary, etc) se mantienen igual ...
 async function listTraffic(req, res, next) {
   try {
     const limit = normalizeLimit(req.query.limit);
@@ -112,18 +129,7 @@ async function listTraffic(req, res, next) {
       total,
       page,
       limit,
-      total_pages: Math.max(1, Math.ceil(total / limit)),
-      filters: {
-        intersection_id: query.intersection_id || null,
-        camera_id: query.camera_id || null,
-        decision: query.decision || null,
-        density: query.density || null,
-        start_date: startDate || null,
-        end_date: endDate || null,
-        limit,
-        page,
-        sort: sortDirection === 1 ? "asc" : "desc"
-      }
+      total_pages: Math.max(1, Math.ceil(total / limit))
     });
   } catch (error) {
     next(error);
@@ -169,7 +175,9 @@ async function getTrafficSummary(req, res, next) {
           density: record.density || null,
           decision: record.decision || null,
           camera_id: record.camera_id || null,
-          timestamp: record.timestamp
+          timestamp: record.timestamp,
+          lat: record.ubicacion?.lat || null,
+          lng: record.ubicacion?.lng || null
         });
       }
     }
@@ -214,7 +222,9 @@ async function getTrafficMetrics(req, res, next) {
         total_pedestrians: 0,
         latest_density: null,
         latest_decision: null,
-        last_seen_at: null
+        last_seen_at: null,
+        lat: record.ubicacion?.lat || null,
+        lng: record.ubicacion?.lng || null
       };
 
       currentIntersection.records += 1;

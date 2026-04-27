@@ -40,10 +40,6 @@ async function activateSemaphoreOverride(req, res, next) {
       throw createHttpError("La ambulancia debe tener la sirena encendida para activar prioridad", 400);
     }
 
-    if (req.currentUser.rol !== "admin" && req.currentUser.rol !== "ambulancia") {
-      throw createHttpError("Solo admin o ambulancia pueden activar prioridad", 403);
-    }
-
     const activeOverride = await SemaphoreOverride.findOne({
       intersection_id: intersectionId,
       status: "active",
@@ -78,33 +74,6 @@ async function activateSemaphoreOverride(req, res, next) {
       });
     }
 
-    // Failsafe timer: revert priority to normal after duration, even without new requests.
-    const timeoutMs = Math.max(1, Math.floor(forceGreenDuration * 1000));
-    const timer = setTimeout(async () => {
-      try {
-        const latest = await SemaphoreOverride.findById(override._id).populate("triggered_by", "nombre rol");
-        if (!latest || latest.status !== "active") {
-          return;
-        }
-        latest.status = "expired";
-        latest.released_at = new Date();
-        latest.release_reason = latest.release_reason || "auto_timeout";
-        await latest.save();
-
-        if (req.io) {
-          req.io.emit("semaphore-override", {
-            type: "expired",
-            override: buildOverrideState(latest)
-          });
-        }
-      } catch (timerError) {
-        console.error("Error expiring semaphore override", timerError);
-      }
-    }, timeoutMs);
-    if (typeof timer.unref === "function") {
-      timer.unref();
-    }
-
     sendSuccess(res, populated, { event_emitted: true }, 201);
   } catch (error) {
     next(error);
@@ -118,10 +87,6 @@ async function releaseSemaphoreOverride(req, res, next) {
 
     if (!override) {
       throw createHttpError("Override no encontrado", 404);
-    }
-
-    if (override.status !== "active") {
-      throw createHttpError("El override ya no esta activo", 409);
     }
 
     override.status = "released";
@@ -139,44 +104,6 @@ async function releaseSemaphoreOverride(req, res, next) {
     }
 
     sendSuccess(res, populated, { event_emitted: true });
-  } catch (error) {
-    next(error);
-  }
-}
-
-async function getSemaphoreOverrides(req, res, next) {
-  try {
-    await expireOldOverrides(req.io);
-    const limit = normalizeLimit(req.query.limit);
-    const page = normalizePage(req.query.page);
-    const sortDirection = normalizeSortDirection(req.query.sort);
-    const skip = (page - 1) * limit;
-    const query = {};
-
-    if (req.query.intersection_id) {
-      query.intersection_id = String(req.query.intersection_id).trim();
-    }
-
-    if (req.query.status) {
-      query.status = String(req.query.status).trim();
-    }
-
-    const [overrides, total] = await Promise.all([
-      SemaphoreOverride.find(query)
-        .populate("triggered_by", "nombre rol")
-        .sort({ createdAt: sortDirection })
-        .skip(skip)
-        .limit(limit),
-      SemaphoreOverride.countDocuments(query)
-    ]);
-
-    sendSuccess(res, overrides, {
-      count: overrides.length,
-      total,
-      page,
-      limit,
-      total_pages: Math.max(1, Math.ceil(total / limit))
-    });
   } catch (error) {
     next(error);
   }
@@ -206,25 +133,21 @@ async function getRealtimeSemaphoreState(req, res, next) {
           vehicle_count: record.vehicle_count || 0,
           pedestrian_count: record.pedestrian_count || 0,
           timestamp: record.timestamp,
+          // Enviamos las coordenadas directamente para Flutter
+          lat: record.ubicacion?.lat || null,
+          lng: record.ubicacion?.lng || null,
           override: null
         });
       }
     }
 
     for (const override of activeOverrides) {
-      const current = stateMap.get(override.intersection_id) || {
-        intersection_id: override.intersection_id,
-        decision: null,
-        density: null,
-        vehicle_count: 0,
-        pedestrian_count: 0,
-        timestamp: null,
-        override: null
-      };
-
-      current.override = buildOverrideState(override);
-      current.decision = "FORCED_GREEN";
-      stateMap.set(override.intersection_id, current);
+      const current = stateMap.get(override.intersection_id);
+      if (current) {
+        current.override = buildOverrideState(override);
+        current.decision = "FORCED_GREEN";
+        stateMap.set(override.intersection_id, current);
+      }
     }
 
     sendSuccess(res, Array.from(stateMap.values()));
