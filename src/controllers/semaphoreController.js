@@ -1,80 +1,63 @@
 const SemaphoreOverride = require("../models/SemaphoreOverride");
 const Traffic = require("../models/Traffic");
+const TrafficLight = require("../models/TrafficLight");
 const { expireOldOverrides } = require("./dashboardController");
 const { createHttpError, sendSuccess } = require("../utils/http");
 const {
   normalizeBoolean,
-  normalizeLimit,
-  normalizePage,
-  normalizeSortDirection,
   normalizeTrimmedString,
   validateObjectId
 } = require("../utils/validation");
 
 function buildOverrideState(record) {
   return {
+    id: record._id,
     intersection_id: record.intersection_id,
-    state: "OVERRIDE_GREEN",
-    road_name: record.road_name,
+    state: "FORCED_GREEN",
     triggered_by: record.triggered_by,
-    trigger_role: record.trigger_role,
-    siren_enabled: record.siren_enabled,
-    detected_by_jetson: record.detected_by_jetson,
     activated_at: record.activated_at,
     expires_at: record.expires_at,
-    release_reason: record.release_reason || null
+    status: record.status
   };
 }
 
 async function activateSemaphoreOverride(req, res, next) {
   try {
-    const intersectionId = normalizeTrimmedString(req.body.intersection_id, "intersection_id", { required: true });
-    const roadName = normalizeTrimmedString(req.body.road_name, "road_name", { allowNull: true }) || null;
-    const sirenEnabled = normalizeBoolean(req.body.siren_enabled, "siren_enabled");
-    const detectedByJetson = normalizeBoolean(req.body.detected_by_jetson, "detected_by_jetson") || false;
-    const forceGreenDuration = req.body.force_green_duration_seconds
-      ? Math.min(Math.max(Number(req.body.force_green_duration_seconds), 5), 120)
-      : 30;
+    const { intersection_id, siren_enabled, force_green_duration_seconds } = req.body;
 
-    if (!sirenEnabled) {
-      throw createHttpError("La ambulancia debe tener la sirena encendida para activar prioridad", 400);
-    }
+    if (!intersection_id) throw createHttpError("intersection_id es requerido", 400);
 
-    const activeOverride = await SemaphoreOverride.findOne({
-      intersection_id: intersectionId,
-      status: "active",
-      expires_at: { $gt: new Date() }
-    });
+    // 1. Verificar que el semáforo existe en la infraestructura estática
+    const light = await TrafficLight.findOne({ intersection_id });
+    if (!light) throw createHttpError("Semáforo no encontrado en la infraestructura", 404);
 
-    if (activeOverride) {
-      throw createHttpError("Ya existe un override activo para esta interseccion", 409);
-    }
+    // 2. Evitar duplicados activos
+    const existing = await SemaphoreOverride.findOne({ intersection_id, status: "active" });
+    if (existing) throw createHttpError("Ya hay una prioridad activa para este semáforo", 409);
 
-    const now = new Date();
-    const expiresAt = new Date(now.getTime() + forceGreenDuration * 1000);
+    const duration = force_green_duration_seconds || 30;
+    const expiresAt = new Date(Date.now() + duration * 1000);
 
+    // 3. Crear Override
     const override = await SemaphoreOverride.create({
-      intersection_id: intersectionId,
-      road_name: roadName,
+      intersection_id,
       triggered_by: req.currentUser._id,
-      trigger_role: req.currentUser.rol === "admin" ? "admin" : "ambulancia",
-      siren_enabled: sirenEnabled,
-      detected_by_jetson: detectedByJetson,
-      force_green_duration_seconds: forceGreenDuration,
-      activated_at: now,
-      expires_at: expiresAt
+      trigger_role: req.currentUser.rol,
+      siren_enabled: !!siren_enabled,
+      expires_at: expiresAt,
+      status: "active"
     });
 
-    const populated = await SemaphoreOverride.findById(override._id).populate("triggered_by", "nombre rol");
-
+    // 4. Feedback Visual Inmediato vía Sockets
     if (req.io) {
-      req.io.emit("semaphore-override", {
-        type: "activated",
-        override: buildOverrideState(populated)
+      req.io.emit("semaphore-status-change", {
+        intersection_id,
+        new_state: "FORCED_GREEN",
+        override_id: override._id
       });
     }
 
-    sendSuccess(res, populated, { event_emitted: true }, 201);
+    sendSuccess(res, buildOverrideState(override), { message: "Prioridad activada correctamente" }, 201);
   } catch (error) {
     next(error);
   }
@@ -82,75 +65,55 @@ async function activateSemaphoreOverride(req, res, next) {
 
 async function releaseSemaphoreOverride(req, res, next) {
   try {
-    validateObjectId(req.params.id, "override id");
-    const override = await SemaphoreOverride.findById(req.params.id);
+    const { id } = req.params; // ID del override o del intersection_id
 
-    if (!override) {
-      throw createHttpError("Override no encontrado", 404);
+    let override;
+    if (id.length > 20) { // Es un ObjectId de Mongo
+      override = await SemaphoreOverride.findById(id);
+    } else { // Es un intersection_id
+      override = await SemaphoreOverride.findOne({ intersection_id: id, status: "active" });
     }
+
+    if (!override) throw createHttpError("No se encontró una prioridad activa para liberar", 404);
 
     override.status = "released";
     override.released_at = new Date();
-    override.release_reason = normalizeTrimmedString(req.body.release_reason, "release_reason") || "manual_release";
+    override.release_reason = "manual_cancel_by_user";
     await override.save();
 
-    const populated = await SemaphoreOverride.findById(override._id).populate("triggered_by", "nombre rol");
-
+    // Notificar a todos que el semáforo vuelve a la normalidad
     if (req.io) {
-      req.io.emit("semaphore-override", {
-        type: "released",
-        override: buildOverrideState(populated)
+      req.io.emit("semaphore-status-change", {
+        intersection_id: override.intersection_id,
+        new_state: "NORMAL",
+        message: "Prioridad cancelada manualmente"
       });
     }
 
-    sendSuccess(res, populated, { event_emitted: true });
+    sendSuccess(res, { status: "released", intersection_id: override.intersection_id });
   } catch (error) {
     next(error);
   }
 }
 
+// ... mantener getRealtimeSemaphoreState para compatibilidad ...
 async function getRealtimeSemaphoreState(req, res, next) {
   try {
-    await expireOldOverrides(req.io);
-    const latestTraffic = await Traffic.find({})
-      .sort({ timestamp: -1 })
-      .limit(100)
-      .lean();
+    const lights = await TrafficLight.find().lean();
+    const activeOverrides = await SemaphoreOverride.find({ status: "active" }).lean();
 
-    const activeOverrides = await SemaphoreOverride.find({
-      status: "active",
-      expires_at: { $gt: new Date() }
-    }).populate("triggered_by", "nombre rol");
+    const response = lights.map(l => {
+      const ov = activeOverrides.find(o => o.intersection_id === l.intersection_id);
+      return {
+        intersection_id: l.intersection_id,
+        lat: l.ubicacion.lat,
+        lng: l.ubicacion.lng,
+        decision: ov ? "FORCED_GREEN" : l.estado_actual,
+        is_priority: !!ov
+      };
+    });
 
-    const stateMap = new Map();
-
-    for (const record of latestTraffic) {
-      if (!stateMap.has(record.intersection_id)) {
-        stateMap.set(record.intersection_id, {
-          intersection_id: record.intersection_id,
-          decision: record.decision || null,
-          density: record.density || null,
-          vehicle_count: record.vehicle_count || 0,
-          pedestrian_count: record.pedestrian_count || 0,
-          timestamp: record.timestamp,
-          // Enviamos las coordenadas directamente para Flutter
-          lat: record.ubicacion?.lat || null,
-          lng: record.ubicacion?.lng || null,
-          override: null
-        });
-      }
-    }
-
-    for (const override of activeOverrides) {
-      const current = stateMap.get(override.intersection_id);
-      if (current) {
-        current.override = buildOverrideState(override);
-        current.decision = "FORCED_GREEN";
-        stateMap.set(override.intersection_id, current);
-      }
-    }
-
-    sendSuccess(res, Array.from(stateMap.values()));
+    sendSuccess(res, response);
   } catch (error) {
     next(error);
   }
@@ -159,6 +122,5 @@ async function getRealtimeSemaphoreState(req, res, next) {
 module.exports = {
   activateSemaphoreOverride,
   getRealtimeSemaphoreState,
-  getSemaphoreOverrides,
   releaseSemaphoreOverride
 };

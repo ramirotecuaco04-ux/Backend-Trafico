@@ -1,109 +1,62 @@
 const User = require("../models/User");
-const { createHttpError, sendSuccess } = require("../utils/http");
-const { normalizeTrimmedString } = require("../utils/validation");
+const TrafficLight = require("../models/TrafficLight");
+const { sendSuccess } = require("../utils/http");
 
-function normalizeSyncPayload(payload = {}) {
-  const normalized = {};
+function calculateDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371e3; // Radio de la Tierra en metros
+  const φ1 = lat1 * Math.PI / 180;
+  const φ2 = lat2 * Math.PI / 180;
+  const Δφ = (lat2 - lat1) * Math.PI / 180;
+  const Δλ = (lon2 - lon1) * Math.PI / 180;
 
-  if (payload.nombre !== undefined) {
-    normalized.nombre = normalizeTrimmedString(payload.nombre, "nombre");
-  }
+  const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+            Math.cos(φ1) * Math.cos(φ2) *
+            Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
-  if (payload.email !== undefined) {
-    normalized.email = normalizeTrimmedString(payload.email, "email", { allowNull: true });
-  }
-
-  if (payload.ubicacion !== undefined) {
-    normalized.ubicacion = {
-      lat: payload.ubicacion?.lat ?? null,
-      lng: payload.ubicacion?.lng ?? null
-    };
-  }
-
-  if (payload.siren_enabled !== undefined) {
-    normalized.siren_enabled = Boolean(payload.siren_enabled);
-  }
-
-  return normalized;
+  return R * c;
 }
 
-function resolveRoleForUid(uid) {
-  if (process.env.FIREBASE_ADMIN_UID && uid === process.env.FIREBASE_ADMIN_UID) {
-    return "admin";
-  }
-
-  return null;
-}
-
-function toSessionUser(user) {
-  if (!user) {
-    return null;
-  }
-
-  return {
-    _id: user._id,
-    id: user._id,
-    nombre: user.nombre,
-    name: user.nombre,
-    displayName: user.nombre,
-    email: user.email,
-    rol: user.rol,
-    role: user.rol,
-    estado: user.estado,
-    firebase_uid: user.firebase_uid,
-    siren_enabled: user.siren_enabled,
-    assigned_intersections: user.assigned_intersections || []
-  };
-}
-
-async function syncCurrentUser(req, res, next) {
+async function updatePresence(req, res, next) {
   try {
-    const payload = normalizeSyncPayload(req.body);
-    const firebaseUid = req.auth.uid;
-    const email = payload.email || req.auth.email || null;
-    const nombre = payload.nombre || req.auth.name || email || firebaseUid;
+    const { lat, lng } = req.body;
 
-    let user = await User.findOne({ firebase_uid: firebaseUid });
+    // 1. Persistir ubicación dinámica
+    await User.findByIdAndUpdate(req.currentUser._id, {
+      "ubicacion.lat": lat,
+      "ubicacion.lng": lng,
+      last_seen_at: new Date()
+    });
 
-    if (!user) {
-      const role = resolveRoleForUid(firebaseUid);
+    // 2. Lógica de Candidatos: Filtrar semáforos estáticos a < 300m
+    const allLights = await TrafficLight.find().lean();
+    const candidateLights = allLights
+      .map(light => ({
+        id: light.intersection_id,
+        name: light.nombre,
+        lat: light.ubicacion.lat,
+        lng: light.ubicacion.lng,
+        distance: calculateDistance(lat, lng, light.ubicacion.lat, light.ubicacion.lng)
+      }))
+      .filter(l => l.distance <= 300) // Radio de 300 metros para candidatos
+      .sort((a, b) => a.distance - b.distance);
 
-      if (!role) {
-        throw createHttpError(
-          "Usuario no autorizado. Debe ser registrado por un administrador antes de iniciar sesion.",
-          403
-        );
-      }
+    // 3. Respuesta para Flutter (para activar OnTap y cambios de icono)
+    sendSuccess(res, {
+      status: "online",
+      candidates: candidateLights, // Lista de semáforos interactuables
+      count: candidateLights.length
+    });
 
-      user = await User.create({
-        firebase_uid: firebaseUid,
-        email,
-        nombre,
-        rol: role,
-        ubicacion: payload.ubicacion,
-        siren_enabled: payload.siren_enabled || false,
-        last_login_at: new Date(),
-        last_seen_at: new Date()
+    // 4. Emitir a otros (Centro de Control)
+    if (req.io) {
+      req.io.emit("ambulance-position", {
+        userId: req.currentUser._id,
+        lat,
+        lng,
+        candidates: candidateLights.map(c => c.id)
       });
-    } else {
-      // Verificar y actualizar rol en cada login
-      const adminRole = resolveRoleForUid(firebaseUid);
-      if (adminRole) {
-        user.rol = adminRole;
-      }
-      
-      if (payload.nombre !== undefined) user.nombre = nombre;
-      if (email !== undefined) user.email = email;
-      if (payload.ubicacion !== undefined) user.ubicacion = payload.ubicacion;
-      if (payload.siren_enabled !== undefined) user.siren_enabled = payload.siren_enabled;
-      user.last_seen_at = new Date();
-      if (!user.last_login_at) {
-        user.last_login_at = new Date();
-      }
-      await user.save();
     }
-
-    sendSuccess(res, toSessionUser(user));
   } catch (error) {
     next(error);
   }
@@ -111,39 +64,24 @@ async function syncCurrentUser(req, res, next) {
 
 async function getCurrentSession(req, res, next) {
   try {
-    sendSuccess(res, toSessionUser(req.currentUser));
+    const user = await User.findById(req.currentUser?._id);
+    sendSuccess(res, user);
   } catch (error) {
     next(error);
   }
 }
 
-async function updatePresence(req, res, next) {
+async function syncCurrentUser(req, res, next) {
   try {
-    if (!req.currentUser) {
-      throw new Error("Usuario autenticado no vinculado en backend");
-    }
-
-    const payload = normalizeSyncPayload(req.body);
-
-    if (payload.ubicacion !== undefined) {
-      req.currentUser.ubicacion = payload.ubicacion;
-    }
-
-    if (payload.siren_enabled !== undefined) {
-      req.currentUser.siren_enabled = payload.siren_enabled;
-    }
-
-    req.currentUser.last_seen_at = new Date();
-    await req.currentUser.save();
-
-    sendSuccess(res, toSessionUser(req.currentUser));
+    const user = await User.findOneAndUpdate(
+      { firebase_uid: req.auth.uid },
+      { last_login_at: new Date() },
+      { new: true }
+    );
+    sendSuccess(res, user);
   } catch (error) {
     next(error);
   }
 }
 
-module.exports = {
-  getCurrentSession,
-  syncCurrentUser,
-  updatePresence
-};
+module.exports = { getCurrentSession, syncCurrentUser, updatePresence };
