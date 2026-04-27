@@ -9,9 +9,10 @@ const { requireRole } = require("../middleware/auth");
 
 const router = express.Router();
 
-router.get("/", requireRole("admin", "vialidad", "patrulla"), getReports);
-router.get("/:id", requireRole("admin", "vialidad", "patrulla"), getReportById);
-router.post("/", requireRole("admin", "vialidad", "patrulla"), createReport);
+// Ambulancia NO tiene acceso a reportes. Solo Admin y Vialidad.
+router.get("/", requireRole("admin", "vialidad"), getReports);
+router.get("/:id", requireRole("admin", "vialidad"), getReportById);
+router.post("/", requireRole("admin", "vialidad"), createReport);
 router.patch("/:id", requireRole("admin"), updateReport);
 
 module.exports = router;

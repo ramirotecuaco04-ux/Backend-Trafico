@@ -47,7 +47,7 @@ function normalizeAlertPayload(payload = {}, { partial = false } = {}) {
 
 async function createAlert(req, res, next) {
   try {
-    if (!req.currentUser || !["admin", "vialidad", "patrulla"].includes(req.currentUser.rol)) {
+    if (!req.currentUser || !["admin", "vialidad"].includes(req.currentUser.rol)) {
       throw createHttpError("Solo admin o vialidad pueden crear alertas", 403);
     }
 

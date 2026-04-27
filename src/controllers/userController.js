@@ -20,7 +20,10 @@ function toUserResponse(user) {
     id: raw._id,
     name: raw.nombre || "",
     displayName: raw.nombre || "",
-    role: raw.rol || ""
+    role: raw.rol || "",
+    // Mapeo explícito para Flutter
+    lat: raw.ubicacion?.lat || null,
+    lng: raw.ubicacion?.lng || null
   };
 }
 
@@ -67,10 +70,14 @@ function normalizeUserPayload(payload = {}, { partial = false } = {}) {
       : [];
   }
 
-  if (payload.ubicacion !== undefined) {
+  // Soporte para ubicación (lat/lng)
+  if (payload.ubicacion !== undefined || payload.lat !== undefined || payload.lng !== undefined) {
+    const lat = payload.ubicacion?.lat ?? payload.lat;
+    const lng = payload.ubicacion?.lng ?? payload.lng;
+
     normalized.ubicacion = {
-      lat: payload.ubicacion?.lat ?? null,
-      lng: payload.ubicacion?.lng ?? null
+      lat: lat !== undefined ? Number(lat) : null,
+      lng: lng !== undefined ? Number(lng) : null
     };
   }
 
@@ -89,7 +96,6 @@ async function createUser(req, res, next) {
       throw createHttpError("Contraseña es obligatoria", 400);
     }
 
-    // Crear usuario en Firebase
     const admin = getFirebaseAdmin();
     if (!admin) {
       throw createHttpError("Firebase no esta configurado en el backend", 500);
@@ -110,15 +116,11 @@ async function createUser(req, res, next) {
       throw createHttpError(`Error en Firebase: ${firebaseError.message}`, 400);
     }
 
-    // Crear usuario en MongoDB
     const userData = {
-      nombre: payload.nombre,
-      email: payload.email,
-      rol: payload.rol,
+      ...payload,
       firebase_uid: firebaseUid,
       estado: "activo",
-      siren_enabled: false,
-      assigned_intersections: payload.assigned_intersections || []
+      siren_enabled: false
     };
 
     const user = await User.create(userData);
@@ -188,13 +190,11 @@ async function updateUser(req, res, next) {
   try {
     validateObjectId(req.params.id, "user id");
     
-    // Primero obtén el usuario actual
     const currentUser = await User.findById(req.params.id);
     if (!currentUser) {
       throw createHttpError("Usuario no encontrado", 404);
     }
 
-    // Si se está actualizando la contraseña y el usuario tiene firebase_uid
     if (req.body.password && currentUser.firebase_uid) {
       try {
         const admin = getFirebaseAdmin();
@@ -208,7 +208,6 @@ async function updateUser(req, res, next) {
       }
     }
 
-    // Luego actualiza en MongoDB
     const user = await User.findByIdAndUpdate(
       req.params.id,
       normalizeUserPayload(req.body, { partial: true }),
@@ -224,15 +223,12 @@ async function updateUser(req, res, next) {
 async function deleteUser(req, res, next) {
   try {
     validateObjectId(req.params.id, "user id");
-    
-    // Primero obtén el usuario para conseguir su firebase_uid
     const user = await User.findById(req.params.id);
 
     if (!user) {
       throw createHttpError("Usuario no encontrado", 404);
     }
 
-    // Si tiene firebase_uid, elimínalo de Firebase
     if (user.firebase_uid) {
       try {
         const admin = getFirebaseAdmin();
@@ -240,12 +236,10 @@ async function deleteUser(req, res, next) {
           await admin.auth().deleteUser(user.firebase_uid);
         }
       } catch (firebaseError) {
-        // Log pero no falla si Firebase no lo encuentra
         console.warn(`No se pudo eliminar de Firebase: ${firebaseError.message}`);
       }
     }
 
-    // Luego elimínalo de MongoDB
     await User.findByIdAndDelete(req.params.id);
 
     sendSuccess(res, {

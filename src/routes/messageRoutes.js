@@ -4,8 +4,8 @@ const { requireRole } = require("../middleware/auth");
 
 const router = express.Router();
 
-router.get("/", requireRole("admin", "vialidad", "patrulla"), getMessages);
+router.get("/", requireRole("admin", "vialidad"), getMessages);
 router.post("/", requireRole("admin"), createMessage);
-router.patch("/:id/read", requireRole("admin", "vialidad", "patrulla"), markMessageAsRead);
+router.patch("/:id/read", requireRole("admin", "vialidad"), markMessageAsRead);
 
 module.exports = router;

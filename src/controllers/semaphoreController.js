@@ -34,7 +34,7 @@ async function activateSemaphoreOverride(req, res, next) {
     const detectedByJetson = normalizeBoolean(req.body.detected_by_jetson, "detected_by_jetson") || false;
     const forceGreenDuration = req.body.force_green_duration_seconds
       ? Math.min(Math.max(Number(req.body.force_green_duration_seconds), 5), 120)
-      : 15;
+      : 30;
 
     if (!sirenEnabled) {
       throw createHttpError("La ambulancia debe tener la sirena encendida para activar prioridad", 400);
@@ -76,6 +76,33 @@ async function activateSemaphoreOverride(req, res, next) {
         type: "activated",
         override: buildOverrideState(populated)
       });
+    }
+
+    // Failsafe timer: revert priority to normal after duration, even without new requests.
+    const timeoutMs = Math.max(1, Math.floor(forceGreenDuration * 1000));
+    const timer = setTimeout(async () => {
+      try {
+        const latest = await SemaphoreOverride.findById(override._id).populate("triggered_by", "nombre rol");
+        if (!latest || latest.status !== "active") {
+          return;
+        }
+        latest.status = "expired";
+        latest.released_at = new Date();
+        latest.release_reason = latest.release_reason || "auto_timeout";
+        await latest.save();
+
+        if (req.io) {
+          req.io.emit("semaphore-override", {
+            type: "expired",
+            override: buildOverrideState(latest)
+          });
+        }
+      } catch (timerError) {
+        console.error("Error expiring semaphore override", timerError);
+      }
+    }, timeoutMs);
+    if (typeof timer.unref === "function") {
+      timer.unref();
     }
 
     sendSuccess(res, populated, { event_emitted: true }, 201);

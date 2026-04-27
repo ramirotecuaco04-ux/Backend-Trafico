@@ -10,7 +10,7 @@ const { requireRole } = require("../middleware/auth");
 const router = express.Router();
 
 router.get("/state", requireRole("admin", "ambulancia"), getRealtimeSemaphoreState);
-router.get("/overrides", requireRole("admin", "ambulancia", "vialidad", "patrulla"), getSemaphoreOverrides);
+router.get("/overrides", requireRole("admin", "ambulancia", "vialidad"), getSemaphoreOverrides);
 router.post("/overrides", requireRole("admin", "ambulancia"), activateSemaphoreOverride);
 router.patch("/overrides/:id/release", requireRole("admin", "ambulancia"), releaseSemaphoreOverride);
 

@@ -70,6 +70,17 @@ function normalizeReportPayload(payload = {}, { partial = false } = {}) {
       : null;
   }
 
+  // Soporte para ubicación (lat/lng)
+  if (payload.ubicacion !== undefined || payload.lat !== undefined || payload.lng !== undefined) {
+    const lat = payload.ubicacion?.lat ?? payload.lat;
+    const lng = payload.ubicacion?.lng ?? payload.lng;
+
+    normalized.ubicacion = {
+      lat: lat !== undefined ? Number(lat) : null,
+      lng: lng !== undefined ? Number(lng) : null
+    };
+  }
+
   if (payload.creado_por !== undefined) {
     normalized.creado_por = payload.creado_por || null;
   }
@@ -124,7 +135,10 @@ function toReportResponse(report) {
     priority: raw.prioridad || "",
     type: raw.tipo || "",
     reporter_name: raw.reportado_por_nombre || "",
-    reporter_uid: raw.reportado_por_uid || ""
+    reporter_uid: raw.reportado_por_uid || "",
+    // Mapeo explícito para Flutter
+    lat: raw.ubicacion?.lat || null,
+    lng: raw.ubicacion?.lng || null
   };
 }
 

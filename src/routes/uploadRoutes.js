@@ -4,6 +4,6 @@ const { requireRole } = require("../middleware/auth");
 
 const router = express.Router();
 
-router.post("/cloudinary/report-signature", requireRole("admin", "vialidad", "patrulla"), createCloudinaryReportSignature);
+router.post("/cloudinary/report-signature", requireRole("admin", "vialidad"), createCloudinaryReportSignature);
 
 module.exports = router;

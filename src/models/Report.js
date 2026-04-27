@@ -19,6 +19,10 @@ const reportSchema = new mongoose.Schema({
     default: "media"
   },
   intersection_id: { type: String, trim: true, default: null },
+  ubicacion: {
+    lat: { type: Number, default: null },
+    lng: { type: Number, default: null }
+  },
   reportado_por_nombre: { type: String, trim: true, default: null },
   reportado_por_uid: { type: String, trim: true, default: null },
   reportado_en: { type: Date, default: Date.now },

@@ -6,7 +6,7 @@ const userSchema = new mongoose.Schema({
   firebase_uid: { type: String, trim: true, unique: true, sparse: true, default: null },
   rol: {
     type: String,
-    enum: ["admin", "vialidad", "patrulla", "ambulancia"],
+    enum: ["admin", "vialidad", "ambulancia"],
     required: true
   },
   estado: { type: String, default: "activo" },
