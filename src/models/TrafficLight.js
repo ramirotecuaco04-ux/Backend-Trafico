@@ -1,22 +1,14 @@
 const mongoose = require("mongoose");
 
 const trafficLightSchema = new mongoose.Schema({
-  intersection_id: { type: String, required: true, unique: true, trim: true },
-  nombre: { type: String, required: true, trim: true },
-  ubicacion: {
-    lat: { type: Number, required: true },
-    lng: { type: Number, required: true }
+  // Mapeamos _id a intersection_id si es necesario, o usamos name
+  name: { type: String, required: true },
+  location: {
+    type: { type: String, enum: ["Point"], default: "Point" },
+    coordinates: { type: [Number], required: true } // [longitud, latitud]
   },
-  estado_actual: {
-    type: String,
-    enum: ["RED", "GREEN", "YELLOW", "FORCED_GREEN"],
-    default: "RED"
-  },
-  last_sync_at: { type: Date, default: Date.now },
-  metadata: {
-    direccion: String,
-    modelo_controlador: String
-  }
+  status: { type: String, default: "red" },
+  is_active: { type: Boolean, default: true }
 }, { timestamps: true });
 
 module.exports = mongoose.model("TrafficLight", trafficLightSchema);
