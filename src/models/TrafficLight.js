@@ -11,4 +11,4 @@ const trafficLightSchema = new mongoose.Schema({
   is_active: { type: Boolean, default: true }
 }, { timestamps: true });
 
-module.exports = mongoose.model("TrafficLight", trafficLightSchema);
+module.exports = mongoose.model("TrafficLight", trafficLightSchema, "trafficlights");
