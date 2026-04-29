@@ -258,7 +258,9 @@ async function getVialidadDashboard(req, res, next) {
         decision: item.decision,
         density: item.density,
         timestamp: item.timestamp,
-        override: item.override
+        override: item.override,
+        lat: item.lat,
+        lng: item.lng
       }))
     });
   } catch (error) {
@@ -291,7 +293,9 @@ async function getAmbulanciaDashboard(req, res, next) {
         decision: item.decision,
         density: item.density,
         timestamp: item.timestamp,
-        override: item.override
+        override: item.override,
+        lat: item.lat,
+        lng: item.lng
       })),
       instructions: {
         can_force_green: true,

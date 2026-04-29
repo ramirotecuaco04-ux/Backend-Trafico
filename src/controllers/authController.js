@@ -29,22 +29,32 @@ async function updatePresence(req, res, next) {
     });
 
     // 2. Lógica de Candidatos: Filtrar semáforos estáticos a < 300m
-    const allLights = await TrafficLight.find().lean();
+    const allLights = await TrafficLight.find({ is_active: true }).lean();
     const candidateLights = allLights
-      .map(light => ({
-        id: light.intersection_id,
-        name: light.nombre,
-        lat: light.ubicacion.lat,
-        lng: light.ubicacion.lng,
-        distance: calculateDistance(lat, lng, light.ubicacion.lat, light.ubicacion.lng)
-      }))
-      .filter(l => l.distance <= 300) // Radio de 300 metros para candidatos
+      .map(light => {
+        // Extraer coordenadas de GeoJSON o usar ubicacion opcional si existe (compatibilidad)
+        const lightLat = light.location?.coordinates ? light.location.coordinates[1] : (light.ubicacion?.lat || null);
+        const lightLng = light.location?.coordinates ? light.location.coordinates[0] : (light.ubicacion?.lng || null);
+
+        if (lat === undefined || lng === undefined || lightLat === null || lightLng === null) {
+          return null;
+        }
+
+        return {
+          id: light.name,
+          name: light.name,
+          lat: lightLat,
+          lng: lightLng,
+          distance: calculateDistance(lat, lng, lightLat, lightLng)
+        };
+      })
+      .filter(l => l !== null && l.distance <= 300)
       .sort((a, b) => a.distance - b.distance);
 
     // 3. Respuesta para Flutter (para activar OnTap y cambios de icono)
     sendSuccess(res, {
       status: "online",
-      candidates: candidateLights, // Lista de semáforos interactuables
+      candidates: candidateLights,
       count: candidateLights.length
     });
 
