@@ -4,6 +4,7 @@ const OperationalMessage = require("../models/OperationalMessage");
 const Report = require("../models/Report");
 const SemaphoreOverride = require("../models/SemaphoreOverride");
 const Traffic = require("../models/Traffic");
+const TrafficLight = require("../models/TrafficLight");
 const User = require("../models/User");
 const { sendSuccess } = require("../utils/http");
 
@@ -44,11 +45,16 @@ async function expireOldOverrides(io) {
 }
 
 async function buildRealtimeIntersectionState() {
+  // 1. Obtener todos los semáforos registrados (Infraestructura base)
+  const allLights = await TrafficLight.find({ is_active: true }).lean();
+
+  // 2. Obtener el tráfico más reciente
   const latestTraffic = await Traffic.find({})
     .sort({ timestamp: -1 })
     .limit(100)
     .lean();
 
+  // 3. Obtener overrides activos
   const activeOverrides = await SemaphoreOverride.find({
     status: "active",
     expires_at: { $gt: new Date() }
@@ -56,8 +62,36 @@ async function buildRealtimeIntersectionState() {
 
   const stateMap = new Map();
 
+  // Inicializar el mapa con todos los semáforos de la base de datos
+  for (const light of allLights) {
+    stateMap.set(light.name, {
+      intersection_id: light.name,
+      decision: "NORMAL",
+      density: "low",
+      vehicle_count: 0,
+      pedestrian_count: 0,
+      timestamp: light.updatedAt || new Date(),
+      override: null,
+      lat: light.location?.coordinates ? light.location.coordinates[1] : null,
+      lng: light.location?.coordinates ? light.location.coordinates[0] : null
+    });
+  }
+
+  // Actualizar con datos de tráfico reales si existen
   for (const record of latestTraffic) {
-    if (!stateMap.has(record.intersection_id)) {
+    const existing = stateMap.get(record.intersection_id);
+    if (existing) {
+      // Solo actualizamos si el registro de tráfico es más reciente o el actual es el default
+      stateMap.set(record.intersection_id, {
+        ...existing,
+        decision: record.decision || existing.decision,
+        density: record.density || existing.density,
+        vehicle_count: record.vehicle_count,
+        pedestrian_count: record.pedestrian_count,
+        timestamp: record.timestamp
+      });
+    } else {
+      // Si la intersección no está en TrafficLight, la agregamos igual para no perder datos
       stateMap.set(record.intersection_id, {
         intersection_id: record.intersection_id,
         decision: record.decision || null,
@@ -65,11 +99,14 @@ async function buildRealtimeIntersectionState() {
         vehicle_count: record.vehicle_count || 0,
         pedestrian_count: record.pedestrian_count || 0,
         timestamp: record.timestamp,
-        override: null
+        override: null,
+        lat: record.ubicacion?.lat || null,
+        lng: record.ubicacion?.lng || null
       });
     }
   }
 
+  // Aplicar Overrides (Prioridad máxima)
   for (const override of activeOverrides) {
     const current = stateMap.get(override.intersection_id) || {
       intersection_id: override.intersection_id,
