@@ -1,11 +1,11 @@
 const Alert = require("../models/Alert");
 const { createHttpError, sendSuccess } = require("../utils/http");
 const {
-  normalizeBoolean,
-  normalizeDate,
   normalizeLimit,
   normalizePage,
   normalizeSortDirection,
+  normalizeDate,
+  normalizeBoolean,
   normalizeTrimmedString,
   validateObjectId
 } = require("../utils/validation");
@@ -47,14 +47,33 @@ function normalizeAlertPayload(payload = {}, { partial = false } = {}) {
 
 async function createAlert(req, res, next) {
   try {
-    if (!req.currentUser || !["admin", "vialidad"].includes(req.currentUser.rol)) {
-      throw createHttpError("Solo admin o vialidad pueden crear alertas", 403);
+    const allowedRoles = ["admin", "vialidad", "ambulancia"];
+    if (!req.currentUser || !allowedRoles.includes(req.currentUser.rol)) {
+      throw createHttpError("No tienes permisos para crear alertas", 403);
     }
 
-    const alert = await Alert.create(normalizeAlertPayload(req.body));
+    const payload = normalizeAlertPayload(req.body);
 
+    // Lógica específica para ambulancias
+    if (payload.tipo === "ambulance" || req.currentUser.rol === "ambulancia") {
+      payload.activa = true;
+      if (!payload.tipo) payload.tipo = "ambulance";
+      if (!payload.prioridad) payload.prioridad = "alta";
+    }
+
+    const alert = await Alert.create(payload);
+
+    // Notificación vía WebSockets
     if (req.io) {
+      // Evento general de actualización
       req.io.emit("alert-update", alert);
+
+      // Evento específico para Admin y Vialidad según requerimiento
+      // Nota: Si el sistema de rooms por rol está implementado, se usaría .to("admin").to("vialidad")
+      req.io.emit("nueva_alerta", {
+        ...alert.toObject(),
+        created_by_role: req.currentUser.rol
+      });
     }
 
     sendSuccess(res, alert, { event_emitted: true }, 201);

@@ -11,7 +11,7 @@ const router = express.Router();
 
 router.get("/", requireRole("admin", "vialidad", "ambulancia"), getAlerts);
 router.get("/:id", requireRole("admin", "vialidad", "ambulancia"), getAlertById);
-router.post("/", requireRole("admin", "vialidad"), createAlert);
+router.post("/", requireRole("admin", "vialidad", "ambulancia"), createAlert);
 router.patch("/:id", requireRole("admin"), updateAlert);
 
 module.exports = router;
