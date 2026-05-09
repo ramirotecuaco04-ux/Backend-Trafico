@@ -52,17 +52,15 @@ async function activateSemaphoreOverride(req, res, next) {
         override_id: override._id
       });
 
-      // Alerta general para el Centro de Control
+      // Alerta general para el Centro de Control (Estructura exacta requerida por el Frontend)
       req.io.emit("nueva_alerta", {
         id: override._id,
         tipo: "ambulancia",
-        titulo: "Prioridad de Paso",
-        subtitulo: intersection_id,
-        descripcion: `Paso de emergencia activado por ${req.currentUser.nombre}`,
-        lat: light.location?.coordinates ? light.location.coordinates[1] : null,
-        lng: light.location?.coordinates ? light.location.coordinates[0] : null,
-        prioridad: "alta",
-        timestamp: override.activated_at
+        titulo: "¡EMERGENCIA DETECTADA!",
+        subtitulo: "Intersección: " + intersection_id,
+        mensaje: "Prioridad de paso activada por unidad de emergencia",
+        activa: true,
+        prioridad: "high"
       });
     }
 
