@@ -3,11 +3,6 @@ const Traffic = require("../models/Traffic");
 const TrafficLight = require("../models/TrafficLight");
 const { expireOldOverrides } = require("./dashboardController");
 const { createHttpError, sendSuccess } = require("../utils/http");
-const {
-  normalizeBoolean,
-  normalizeTrimmedString,
-  validateObjectId
-} = require("../utils/validation");
 
 function buildOverrideState(record) {
   return {
@@ -28,7 +23,7 @@ async function activateSemaphoreOverride(req, res, next) {
     if (!intersection_id) throw createHttpError("intersection_id es requerido", 400);
 
     // 1. Verificar que el semáforo existe en la infraestructura estática
-    const light = await TrafficLight.findOne({ intersection_id });
+    const light = await TrafficLight.findOne({ name: intersection_id });
     if (!light) throw createHttpError("Semáforo no encontrado en la infraestructura", 404);
 
     // 2. Evitar duplicados activos
@@ -65,12 +60,12 @@ async function activateSemaphoreOverride(req, res, next) {
 
 async function releaseSemaphoreOverride(req, res, next) {
   try {
-    const { id } = req.params; // ID del override o del intersection_id
+    const { id } = req.params;
 
     let override;
-    if (id.length > 20) { // Es un ObjectId de Mongo
+    if (id.length > 20) {
       override = await SemaphoreOverride.findById(id);
-    } else { // Es un intersection_id
+    } else {
       override = await SemaphoreOverride.findOne({ intersection_id: id, status: "active" });
     }
 
@@ -81,7 +76,6 @@ async function releaseSemaphoreOverride(req, res, next) {
     override.release_reason = "manual_cancel_by_user";
     await override.save();
 
-    // Notificar a todos que el semáforo vuelve a la normalidad
     if (req.io) {
       req.io.emit("semaphore-status-change", {
         intersection_id: override.intersection_id,
@@ -96,20 +90,23 @@ async function releaseSemaphoreOverride(req, res, next) {
   }
 }
 
-// ... mantener getRealtimeSemaphoreState para compatibilidad ...
 async function getRealtimeSemaphoreState(req, res, next) {
   try {
-    const lights = await TrafficLight.find().lean();
+    // REPARACIÓN: find({}) sin filtros de rol y manejo robusto de coordenadas
+    const lights = await TrafficLight.find({}).lean();
     const activeOverrides = await SemaphoreOverride.find({ status: "active" }).lean();
 
     const response = lights.map(l => {
-      const ov = activeOverrides.find(o => o.intersection_id === l.intersection_id);
+      const ov = activeOverrides.find(o => o.intersection_id === l.name);
+
       return {
-        intersection_id: l.intersection_id,
-        lat: l.ubicacion.lat,
-        lng: l.ubicacion.lng,
-        decision: ov ? "FORCED_GREEN" : l.estado_actual,
-        is_priority: !!ov
+        intersection_id: l.name,
+        name: l.name,
+        lat: l.location?.coordinates ? l.location.coordinates[1] : (l.ubicacion?.lat || null),
+        lng: l.location?.coordinates ? l.location.coordinates[0] : (l.ubicacion?.lng || null),
+        decision: ov ? "FORCED_GREEN" : (l.status || "NORMAL"),
+        is_priority: !!ov,
+        state: ov ? "FORCED_GREEN" : (l.status || "NORMAL")
       };
     });
 
