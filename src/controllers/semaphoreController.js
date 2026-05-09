@@ -43,12 +43,26 @@ async function activateSemaphoreOverride(req, res, next) {
       status: "active"
     });
 
-    // 4. Feedback Visual Inmediato vía Sockets
+    // 4. Feedback Visual Inmediato vía Sockets (Broadcasting a todos con req.io)
     if (req.io) {
-      req.io.emit("semaphore-status-change", {
+      // Notificación de estado para el mapa
+      req.io.emit("emergency-override-active", {
         intersection_id,
-        new_state: "FORCED_GREEN",
+        status: "FORCED_GREEN",
         override_id: override._id
+      });
+
+      // Alerta general para el Centro de Control
+      req.io.emit("nueva_alerta", {
+        id: override._id,
+        tipo: "ambulancia",
+        titulo: "Prioridad de Paso",
+        subtitulo: intersection_id,
+        descripcion: `Paso de emergencia activado por ${req.currentUser.nombre}`,
+        lat: light.location?.coordinates ? light.location.coordinates[1] : null,
+        lng: light.location?.coordinates ? light.location.coordinates[0] : null,
+        prioridad: "alta",
+        timestamp: override.activated_at
       });
     }
 
@@ -77,9 +91,9 @@ async function releaseSemaphoreOverride(req, res, next) {
     await override.save();
 
     if (req.io) {
-      req.io.emit("semaphore-status-change", {
+      req.io.emit("emergency-override-released", {
         intersection_id: override.intersection_id,
-        new_state: "NORMAL",
+        status: "NORMAL",
         message: "Prioridad cancelada manualmente"
       });
     }
@@ -92,7 +106,6 @@ async function releaseSemaphoreOverride(req, res, next) {
 
 async function getRealtimeSemaphoreState(req, res, next) {
   try {
-    // REPARACIÓN: find({}) sin filtros de rol y manejo robusto de coordenadas
     const lights = await TrafficLight.find({}).lean();
     const activeOverrides = await SemaphoreOverride.find({ status: "active" }).lean();
 
