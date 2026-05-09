@@ -46,7 +46,8 @@ async function expireOldOverrides(io) {
 
 async function buildRealtimeIntersectionState() {
   // 1. Obtener todos los semáforos registrados (Infraestructura base)
-  const allLights = await TrafficLight.find({ is_active: true }).lean();
+  // MODIFICACIÓN: La ambulancia debe ver todos los semáforos, no solo los activos.
+  const allLights = await TrafficLight.find({}).lean();
 
   // 2. Obtener el tráfico más reciente
   const latestTraffic = await Traffic.find({})
@@ -66,6 +67,7 @@ async function buildRealtimeIntersectionState() {
   for (const light of allLights) {
     stateMap.set(light.name, {
       intersection_id: light.name,
+      name: light.name,
       decision: "NORMAL",
       density: "low",
       vehicle_count: 0,
@@ -73,7 +75,8 @@ async function buildRealtimeIntersectionState() {
       timestamp: light.updatedAt || new Date(),
       override: null,
       lat: light.location?.coordinates ? light.location.coordinates[1] : null,
-      lng: light.location?.coordinates ? light.location.coordinates[0] : null
+      lng: light.location?.coordinates ? light.location.coordinates[0] : null,
+      is_active: light.is_active
     });
   }
 
@@ -94,6 +97,7 @@ async function buildRealtimeIntersectionState() {
       // Si la intersección no está en TrafficLight, la agregamos igual para no perder datos
       stateMap.set(record.intersection_id, {
         intersection_id: record.intersection_id,
+        name: record.intersection_id,
         decision: record.decision || null,
         density: record.density || null,
         vehicle_count: record.vehicle_count || 0,
@@ -101,7 +105,8 @@ async function buildRealtimeIntersectionState() {
         timestamp: record.timestamp,
         override: null,
         lat: record.ubicacion?.lat || null,
-        lng: record.ubicacion?.lng || null
+        lng: record.ubicacion?.lng || null,
+        is_active: true
       });
     }
   }
@@ -110,6 +115,7 @@ async function buildRealtimeIntersectionState() {
   for (const override of activeOverrides) {
     const current = stateMap.get(override.intersection_id) || {
       intersection_id: override.intersection_id,
+      name: override.intersection_id,
       decision: null,
       density: null,
       vehicle_count: 0,
@@ -179,6 +185,7 @@ async function getAdminDashboard(req, res, next) {
         ambulancias_online: users.filter((user) => user.rol === "ambulancia" && user.last_seen_at).length
       },
       intersections,
+      semaphores: intersections,
       active_alerts: activeAlerts,
       active_overrides: activeOverrides,
       recent_reports: recentReports,
@@ -253,15 +260,8 @@ async function getVialidadDashboard(req, res, next) {
       active_alerts: activeAlerts,
       messages,
       reports: ownReports,
-      intersections: intersections.map((item) => ({
-        intersection_id: item.intersection_id,
-        decision: item.decision,
-        density: item.density,
-        timestamp: item.timestamp,
-        override: item.override,
-        lat: item.lat,
-        lng: item.lng
-      }))
+      intersections,
+      semaphores: intersections
     });
   } catch (error) {
     next(error);
@@ -288,15 +288,8 @@ async function getAmbulanciaDashboard(req, res, next) {
         assigned_intersections: req.currentUser.assigned_intersections || []
       },
       current_override: currentOverride,
-      intersections: intersections.map((item) => ({
-        intersection_id: item.intersection_id,
-        decision: item.decision,
-        density: item.density,
-        timestamp: item.timestamp,
-        override: item.override,
-        lat: item.lat,
-        lng: item.lng
-      })),
+      intersections,
+      semaphores: intersections,
       instructions: {
         can_force_green: true,
         siren_required: true,

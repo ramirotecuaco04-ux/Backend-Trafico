@@ -19,39 +19,51 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
 
 async function updatePresence(req, res, next) {
   try {
-    const { lat, lng } = req.body;
+    // REPARACIÓN: Extraer lat/lng con Optional Chaining para evitar Error 500
+    // Soporta tanto {lat, lng} como {ubicacion: {lat, lng}}
+    const lat = req.body.lat ?? req.body.ubicacion?.lat;
+    const lng = req.body.lng ?? req.body.ubicacion?.lng;
 
-    // 1. Persistir ubicación dinámica
-    await User.findByIdAndUpdate(req.currentUser._id, {
-      "ubicacion.lat": lat,
-      "ubicacion.lng": lng,
-      last_seen_at: new Date()
-    });
+    // 1. Persistir ubicación dinámica (solo si vienen datos)
+    if (lat !== undefined && lng !== undefined) {
+      await User.findByIdAndUpdate(req.currentUser._id, {
+        "ubicacion.lat": lat,
+        "ubicacion.lng": lng,
+        last_seen_at: new Date()
+      });
+    } else {
+      await User.findByIdAndUpdate(req.currentUser._id, {
+        last_seen_at: new Date()
+      });
+    }
 
     // 2. Lógica de Candidatos: Filtrar semáforos estáticos a < 300m
-    const allLights = await TrafficLight.find({ is_active: true }).lean();
-    const candidateLights = allLights
-      .map(light => {
-        // Extraer coordenadas de GeoJSON o usar ubicacion opcional si existe (compatibilidad)
-        const lightLat = light.location?.coordinates ? light.location.coordinates[1] : (light.ubicacion?.lat || null);
-        const lightLng = light.location?.coordinates ? light.location.coordinates[0] : (light.ubicacion?.lng || null);
+    // AJUSTE: Quitamos el filtro is_active para que la ambulancia detecte candidatos siempre
+    const allLights = await TrafficLight.find().lean();
 
-        if (lat === undefined || lng === undefined || lightLat === null || lightLng === null) {
-          return null;
-        }
+    let candidateLights = [];
+    if (lat !== undefined && lng !== undefined) {
+      candidateLights = allLights
+        .map(light => {
+          // Extraer coordenadas de GeoJSON o de campo ubicacion antiguo
+          const lightLat = light.location?.coordinates ? light.location.coordinates[1] : (light.ubicacion?.lat || null);
+          const lightLng = light.location?.coordinates ? light.location.coordinates[0] : (light.ubicacion?.lng || null);
 
-        return {
-          id: light.name,
-          name: light.name,
-          lat: lightLat,
-          lng: lightLng,
-          distance: calculateDistance(lat, lng, lightLat, lightLng)
-        };
-      })
-      .filter(l => l !== null && l.distance <= 300)
-      .sort((a, b) => a.distance - b.distance);
+          if (lightLat === null || lightLng === null) return null;
 
-    // 3. Respuesta para Flutter (para activar OnTap y cambios de icono)
+          return {
+            id: light.name,
+            name: light.name,
+            lat: lightLat,
+            lng: lightLng,
+            distance: calculateDistance(lat, lng, lightLat, lightLng)
+          };
+        })
+        .filter(l => l !== null && l.distance <= 300)
+        .sort((a, b) => a.distance - b.distance);
+    }
+
+    // 3. Respuesta para Flutter
     sendSuccess(res, {
       status: "online",
       candidates: candidateLights,
@@ -59,7 +71,7 @@ async function updatePresence(req, res, next) {
     });
 
     // 4. Emitir a otros (Centro de Control)
-    if (req.io) {
+    if (req.io && lat !== undefined && lng !== undefined) {
       req.io.emit("ambulance-position", {
         userId: req.currentUser._id,
         lat,
