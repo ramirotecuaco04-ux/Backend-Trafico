@@ -44,9 +44,27 @@ async function expireOldOverrides(io) {
   }
 }
 
+/**
+ * Mapea una alerta del modelo de base de datos al formato esperado por el Frontend (Flutter)
+ * Genera dinámicamente titulo y subtitulo para evitar notificaciones vacías.
+ */
+function mapAlertForFrontend(alert) {
+  const alertObj = alert.toObject ? alert.toObject() : alert;
+  return {
+    id: alertObj._id.toString(),
+    tipo: alertObj.tipo || "sistema",
+    titulo: alertObj.tipo === "ambulancia" ? "¡EMERGENCIA DETECTADA!" : "ALERTA DE SISTEMA",
+    subtitulo: alertObj.intersection_id ? "Intersección: " + alertObj.intersection_id : "Aviso General",
+    mensaje: alertObj.mensaje || "Prioridad de paso activada",
+    prioridad: alertObj.prioridad === "alta" ? "high" : (alertObj.prioridad === "baja" ? "low" : "medium"),
+    activa: alertObj.activa !== undefined ? alertObj.activa : true,
+    timestamp: alertObj.createdAt
+  };
+}
+
 async function buildRealtimeIntersectionState() {
   // 1. Obtener todos los semáforos registrados (Infraestructura base)
-  // MODIFICACIÓN: La ambulancia debe ver todos los semáforos, no solo los activos.
+  // AJUSTE: Se mantiene find({}) sin filtros para asegurar visibilidad total en el mapa.
   const allLights = await TrafficLight.find({}).lean();
 
   // 2. Obtener el tráfico más reciente
@@ -121,7 +139,8 @@ async function buildRealtimeIntersectionState() {
       vehicle_count: 0,
       pedestrian_count: 0,
       timestamp: null,
-      override: null
+      override: null,
+      is_active: true
     };
 
     current.override = {
@@ -157,7 +176,7 @@ async function getAdminDashboard(req, res, next) {
       recentMessages
     ] = await Promise.all([
       Traffic.find({}).sort({ timestamp: -1 }).limit(20).lean(),
-      Alert.find({ activa: true }).sort({ createdAt: -1 }).limit(10).lean(),
+      Alert.find({ activa: true }).sort({ createdAt: -1 }).limit(10),
       SemaphoreOverride.find({ status: "active", expires_at: { $gt: new Date() } })
         .populate("triggered_by", "nombre rol")
         .sort({ createdAt: -1 }),
@@ -186,7 +205,7 @@ async function getAdminDashboard(req, res, next) {
       },
       intersections,
       semaphores: intersections,
-      active_alerts: activeAlerts,
+      active_alerts: activeAlerts.map(mapAlertForFrontend),
       active_overrides: activeOverrides,
       recent_reports: recentReports,
       recent_messages: recentMessages,
@@ -215,7 +234,7 @@ async function getVialidadDashboard(req, res, next) {
     const currentUserId = req.currentUser._id;
 
     const [activeAlerts, messages, ownReports, intersections] = await Promise.all([
-      Alert.find({ activa: true }).sort({ createdAt: -1 }).limit(20).lean(),
+      Alert.find({ activa: true }).sort({ createdAt: -1 }).limit(20),
       OperationalMessage.find({
         $or: [
           { to_role: "vialidad" },
@@ -257,7 +276,7 @@ async function getVialidadDashboard(req, res, next) {
         unread_messages: unreadMessages,
         reports_visible: ownReports.length
       },
-      active_alerts: activeAlerts,
+      active_alerts: activeAlerts.map(mapAlertForFrontend),
       messages,
       reports: ownReports,
       intersections,

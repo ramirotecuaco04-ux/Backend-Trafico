@@ -1,6 +1,7 @@
 const SemaphoreOverride = require("../models/SemaphoreOverride");
 const Traffic = require("../models/Traffic");
 const TrafficLight = require("../models/TrafficLight");
+const Alert = require("../models/Alert");
 const { expireOldOverrides } = require("./dashboardController");
 const { createHttpError, sendSuccess } = require("../utils/http");
 
@@ -22,7 +23,7 @@ async function activateSemaphoreOverride(req, res, next) {
 
     if (!intersection_id) throw createHttpError("intersection_id es requerido", 400);
 
-    // 1. Verificar que el semáforo existe en la infraestructura estática
+    // 1. Verificar que el semáforo existe
     const light = await TrafficLight.findOne({ name: intersection_id });
     if (!light) throw createHttpError("Semáforo no encontrado en la infraestructura", 404);
 
@@ -43,25 +44,41 @@ async function activateSemaphoreOverride(req, res, next) {
       status: "active"
     });
 
-    // 4. Feedback Visual Inmediato vía Sockets (Broadcasting a todos con req.io)
+    // 3.1. Persistir Alerta en Base de Datos con campo 'activa: true'
+    const alert = await Alert.create({
+      tipo: "ambulancia",
+      mensaje: "Prioridad de paso activada por unidad de emergencia",
+      prioridad: "alta",
+      intersection_id: intersection_id,
+      ubicacion: {
+        lat: light.location?.coordinates ? light.location.coordinates[1] : (light.ubicacion?.lat || null),
+        lng: light.location?.coordinates ? light.location.coordinates[0] : (light.ubicacion?.lng || null)
+      },
+      activa: true
+    });
+
+    // 4. Emisiones Socket.io (Broadcasting a todos con req.io)
     if (req.io) {
-      // Notificación de estado para el mapa
+      // Estado dinámico para el mapa
       req.io.emit("emergency-override-active", {
         intersection_id,
         status: "FORCED_GREEN",
         override_id: override._id
       });
 
-      // Alerta general para el Centro de Control (Estructura exacta requerida por el Frontend)
-      req.io.emit("nueva_alerta", {
-        id: override._id,
+      // Estructura EXACTA para el Frontend de Flutter
+      const alertData = {
+        id: override._id.toString(), // Vinculamos con el ID del override
         tipo: "ambulancia",
         titulo: "¡EMERGENCIA DETECTADA!",
         subtitulo: "Intersección: " + intersection_id,
         mensaje: "Prioridad de paso activada por unidad de emergencia",
         activa: true,
         prioridad: "high"
-      });
+      };
+
+      req.io.emit("nueva_alerta", alertData);
+      console.log('✅ Alerta emitida con éxito:', alertData);
     }
 
     sendSuccess(res, buildOverrideState(override), { message: "Prioridad activada correctamente" }, 201);
@@ -87,6 +104,9 @@ async function releaseSemaphoreOverride(req, res, next) {
     override.released_at = new Date();
     override.release_reason = "manual_cancel_by_user";
     await override.save();
+
+    // 5. Marcar alertas asociadas como inactivas
+    await Alert.updateMany({ intersection_id: override.intersection_id, activa: true }, { activa: false });
 
     if (req.io) {
       req.io.emit("emergency-override-released", {
