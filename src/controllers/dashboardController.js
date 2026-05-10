@@ -60,9 +60,11 @@ async function expireOldOverrides(io) {
  * Mapea una alerta del modelo de base de datos al formato esperado por el Frontend (Flutter)
  * Genera dinámicamente titulo, subtitulo y description para evitar "Sin descripción".
  */
-function mapAlertForFrontend(alert) {
+function mapAlertForFrontend(alert, currentUserId = null) {
   const alertObj = alert.toObject ? alert.toObject() : alert;
   const description = alertObj.description || alertObj.mensaje || "Prioridad de paso activada";
+
+  const isRead = currentUserId && alertObj.read_by && alertObj.read_by.some(id => String(id) === String(currentUserId));
 
   return {
     id: alertObj._id.toString(),
@@ -73,13 +75,13 @@ function mapAlertForFrontend(alert) {
     description: description, // Campo clave para el feed de Flutter (¡Evita 'Sin descripción'!)
     prioridad: alertObj.prioridad === "alta" ? "high" : (alertObj.prioridad === "baja" ? "low" : "medium"),
     activa: alertObj.activa !== undefined ? alertObj.activa : true,
+    is_read: !!isRead,
     timestamp: alertObj.createdAt
   };
 }
 
 async function buildRealtimeIntersectionState() {
   // 1. Obtener todos los semáforos registrados (Infraestructura base)
-  // Se mantiene find({}) sin filtros para asegurar visibilidad total en el mapa.
   const allLights = await TrafficLight.find({}).lean();
 
   // 2. Obtener el tráfico más reciente
@@ -117,7 +119,6 @@ async function buildRealtimeIntersectionState() {
   for (const record of latestTraffic) {
     const existing = stateMap.get(record.intersection_id);
     if (existing) {
-      // Solo actualizamos si el registro de tráfico es más reciente o el actual es el default
       stateMap.set(record.intersection_id, {
         ...existing,
         decision: record.decision || existing.decision,
@@ -127,7 +128,6 @@ async function buildRealtimeIntersectionState() {
         timestamp: record.timestamp
       });
     } else {
-      // Si la intersección no está en TrafficLight, la agregamos igual para no perder datos
       stateMap.set(record.intersection_id, {
         intersection_id: record.intersection_id,
         name: record.intersection_id,
@@ -178,6 +178,7 @@ async function buildRealtimeIntersectionState() {
 async function getAdminDashboard(req, res, next) {
   try {
     await expireOldOverrides(req.io);
+    const userId = req.currentUser._id;
     const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const offlineThreshold = new Date(Date.now() - 10 * 60 * 1000);
 
@@ -191,7 +192,8 @@ async function getAdminDashboard(req, res, next) {
       recentMessages
     ] = await Promise.all([
       Traffic.find({}).sort({ timestamp: -1 }).limit(20).lean(),
-      Alert.find({ activa: true }).sort({ createdAt: -1 }).limit(10),
+      // Solo alertas no leídas por el usuario actual
+      Alert.find({ activa: true, read_by: { $ne: userId } }).sort({ createdAt: -1 }).limit(10),
       SemaphoreOverride.find({ status: "active", expires_at: { $gt: new Date() } })
         .populate("triggered_by", "nombre rol")
         .sort({ createdAt: -1 }),
@@ -211,7 +213,7 @@ async function getAdminDashboard(req, res, next) {
     sendSuccess(res, {
       totals: {
         intersections: intersections.length,
-        active_alerts: activeAlerts.length,
+        active_alerts: activeAlerts.length, // Refleja solo las no leídas
         active_overrides: activeOverrides.length,
         users: users.length,
         online_devices: onlineDevices,
@@ -220,7 +222,7 @@ async function getAdminDashboard(req, res, next) {
       },
       intersections,
       semaphores: intersections,
-      active_alerts: activeAlerts.map(mapAlertForFrontend),
+      active_alerts: activeAlerts.map(a => mapAlertForFrontend(a, userId)),
       active_overrides: activeOverrides,
       recent_reports: recentReports,
       recent_messages: recentMessages,
@@ -249,7 +251,8 @@ async function getVialidadDashboard(req, res, next) {
     const currentUserId = req.currentUser._id;
 
     const [activeAlerts, messages, ownReports, intersections] = await Promise.all([
-      Alert.find({ activa: true }).sort({ createdAt: -1 }).limit(20),
+      // Solo alertas no leídas por el usuario actual
+      Alert.find({ activa: true, read_by: { $ne: currentUserId } }).sort({ createdAt: -1 }).limit(20),
       OperationalMessage.find({
         $or: [
           { to_role: "vialidad" },
@@ -291,7 +294,7 @@ async function getVialidadDashboard(req, res, next) {
         unread_messages: unreadMessages,
         reports_visible: ownReports.length
       },
-      active_alerts: activeAlerts.map(mapAlertForFrontend),
+      active_alerts: activeAlerts.map(a => mapAlertForFrontend(a, currentUserId)),
       messages,
       reports: ownReports,
       intersections,
@@ -305,12 +308,18 @@ async function getVialidadDashboard(req, res, next) {
 async function getAmbulanciaDashboard(req, res, next) {
   try {
     await expireOldOverrides(req.io);
+    const userId = req.currentUser._id;
     const intersections = await buildRealtimeIntersectionState();
-    const currentOverride = await SemaphoreOverride.findOne({
-      triggered_by: req.currentUser._id,
-      status: "active",
-      expires_at: { $gt: new Date() }
-    }).sort({ createdAt: -1 });
+
+    const [currentOverride, activeAlerts] = await Promise.all([
+      SemaphoreOverride.findOne({
+        triggered_by: userId,
+        status: "active",
+        expires_at: { $gt: new Date() }
+      }).sort({ createdAt: -1 }),
+      // Solo alertas no leídas por el usuario actual
+      Alert.find({ activa: true, read_by: { $ne: userId } }).sort({ createdAt: -1 }).limit(5)
+    ]);
 
     sendSuccess(res, {
       profile: {
@@ -321,6 +330,10 @@ async function getAmbulanciaDashboard(req, res, next) {
         ubicacion: req.currentUser.ubicacion || null,
         assigned_intersections: req.currentUser.assigned_intersections || []
       },
+      counters: {
+        active_alerts: activeAlerts.length
+      },
+      active_alerts: activeAlerts.map(a => mapAlertForFrontend(a, userId)),
       current_override: currentOverride,
       intersections,
       semaphores: intersections,

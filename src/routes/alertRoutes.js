@@ -12,7 +12,8 @@ const router = express.Router();
 
 // Rutas protegidas por autenticación y roles
 router.get("/", requireAuth, requireRole("admin", "vialidad", "ambulancia"), getAlerts);
-router.patch("/read-all", requireAuth, requireRole("admin", "vialidad"), markAllAsRead);
+// Permitimos que ambulancia también pueda limpiar sus notificaciones
+router.patch("/read-all", requireAuth, requireRole("admin", "vialidad", "ambulancia"), markAllAsRead);
 router.get("/:id", requireAuth, requireRole("admin", "vialidad", "ambulancia"), getAlertById);
 router.post("/", requireAuth, requireRole("admin", "vialidad", "ambulancia"), createAlert);
 router.patch("/:id", requireAuth, requireRole("admin"), updateAlert);

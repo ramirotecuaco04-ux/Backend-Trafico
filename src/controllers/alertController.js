@@ -17,10 +17,6 @@ function normalizeAlertPayload(payload = {}, { partial = false } = {}) {
     normalized.mensaje = normalizeTrimmedString(payload.mensaje, "mensaje", { required: true });
   }
 
-  if (payload.description !== undefined) {
-    normalized.description = normalizeTrimmedString(payload.description, "description");
-  }
-
   if (payload.tipo !== undefined) {
     normalized.tipo = String(payload.tipo).trim();
   }
@@ -72,7 +68,6 @@ async function createAlert(req, res, next) {
       req.io.emit("alert-update", alert);
       req.io.emit("nueva_alerta", {
         ...alert.toObject(),
-        description: alert.mensaje,
         created_by_role: req.currentUser.rol
       });
     }
@@ -94,7 +89,14 @@ async function getAlerts(req, res, next) {
     const endDate = normalizeDate(req.query.end_date, "end_date");
 
     if (req.query.activa !== undefined) {
-      query.activa = normalizeBoolean(req.query.activa, "activa");
+      const isActive = normalizeBoolean(req.query.activa, "activa");
+      query.activa = isActive;
+
+      // Si se piden alertas activas, filtramos las que ya leyó este usuario específico
+      // para que no cuenten en el contador de pendientes del frontend.
+      if (isActive && req.currentUser) {
+        query.read_by = { $ne: req.currentUser._id };
+      }
     }
 
     if (req.query.tipo) {
@@ -111,18 +113,19 @@ async function getAlerts(req, res, next) {
 
     if (startDate || endDate) {
       query.createdAt = {};
-      if (startDate) query.createdAt.$gte = startDate;
-      if (endDate) query.createdAt.$lte = endDate;
+
+      if (startDate) {
+        query.createdAt.$gte = startDate;
+      }
+
+      if (endDate) {
+        query.createdAt.$lte = endDate;
+      }
     }
 
-    const [alerts, total, unreadCount] = await Promise.all([
+    const [alerts, total] = await Promise.all([
       Alert.find(query).sort({ createdAt: sortDirection }).skip(skip).limit(limit),
-      Alert.countDocuments(query),
-      // Contar alertas activas no leídas por el usuario actual
-      Alert.countDocuments({
-        activa: true,
-        read_by: { $ne: req.currentUser._id }
-      })
+      Alert.countDocuments(query)
     ]);
 
     sendSuccess(res, alerts, {
@@ -130,9 +133,7 @@ async function getAlerts(req, res, next) {
       total,
       page,
       limit,
-      total_pages: Math.max(1, Math.ceil(total / limit)),
-      unread_count: unreadCount,
-      has_new: unreadCount > 0 // Propiedad solicitada para el punto rojo en el frontend
+      total_pages: Math.max(1, Math.ceil(total / limit))
     });
   } catch (error) {
     next(error);
@@ -146,12 +147,6 @@ async function getAlertById(req, res, next) {
 
     if (!alert) {
       throw createHttpError("Alerta no encontrada", 404);
-    }
-
-    // Marcar como leída individualmente al consultar el detalle
-    if (!alert.read_by.includes(req.currentUser._id)) {
-      alert.read_by.push(req.currentUser._id);
-      await alert.save();
     }
 
     sendSuccess(res, alert);
@@ -183,30 +178,19 @@ async function updateAlert(req, res, next) {
 }
 
 /**
- * Marca todas las alertas como leídas para el usuario actual.
- * Si el usuario es Admin, también las marca como inactivas globalmente para limpiar el feed.
+ * Marca todas las alertas activas como leídas para el usuario actual.
  */
 async function markAllAsRead(req, res, next) {
   try {
     const userId = req.currentUser._id;
 
-    // 1. Agregar el ID del usuario a la lista de 'leído por'
+    // Agregamos al usuario actual a la lista de "read_by" para todas las alertas activas
     await Alert.updateMany(
       { activa: true, read_by: { $ne: userId } },
       { $addToSet: { read_by: userId } }
     );
 
-    // 2. Si es Admin o Vialidad, podemos desactivarlas globalmente para limpiar la vista de emergencia
-    // (Dependiendo de si queremos que el estado de 'emergencia' persista hasta que alguien lo cierre)
-    if (req.currentUser.rol === "admin") {
-      await Alert.updateMany({ activa: true }, { $set: { activa: false } });
-    }
-
-    if (req.io) {
-      req.io.emit("alerts-cleared", { by: req.currentUser.nombre });
-    }
-
-    sendSuccess(res, { message: "Todas las alertas han sido marcadas como leídas" });
+    sendSuccess(res, { message: "Todas las alertas marcadas como leídas" });
   } catch (error) {
     next(error);
   }
