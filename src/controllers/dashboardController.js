@@ -25,7 +25,11 @@ async function expireOldOverrides(io) {
     item.release_reason = item.release_reason || "auto_timeout";
     await item.save();
 
+    // Desactivar alertas asociadas a la expiración automática
+    await Alert.updateMany({ intersection_id: item.intersection_id, activa: true }, { activa: false });
+
     if (io) {
+      // 1. Notificación detallada de expiración
       io.emit("semaphore-override", {
         type: "expired",
         override: {
@@ -40,6 +44,14 @@ async function expireOldOverrides(io) {
           release_reason: item.release_reason
         }
       });
+
+      // 2. Evento global solicitado para limpiar el estado FORCED_GREEN en el mapa del Admin
+      io.emit("emergency-override-released", {
+        intersection_id: item.intersection_id,
+        status: "NORMAL"
+      });
+
+      console.log(`⏰ Prioridad expirada automáticamente en: ${item.intersection_id}. Estado NORMAL emitido.`);
     }
   }
 }
