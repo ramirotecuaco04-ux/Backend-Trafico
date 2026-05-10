@@ -81,14 +81,38 @@ async function updatePresence(req, res, next) {
         lat: currentLat,
         lng: currentLng,
         role: req.currentUser.rol,
+        name: req.currentUser.nombre,
         candidates: candidateLights.map(c => c.id)
       };
 
+      // Evento genérico para mapa táctico
       req.io.emit("position_update", positionData);
+
+      // NUEVO: Evento con payload redundante para compatibilidad total con Flutter (SessionController)
+      req.io.emit("user_locations_update", {
+        // Enviamos todas las formas posibles de ID
+        id: req.currentUser._id.toString(),
+        _id: req.currentUser._id.toString(),
+        userId: req.currentUser._id.toString(),
+        uid: req.currentUser._id.toString(),
+
+        // Datos de ubicación
+        lat: currentLat,
+        lng: currentLng,
+        latitude: currentLat,
+        longitude: currentLng,
+
+        // Información de perfil
+        name: req.currentUser.nombre || req.currentUser.name,
+        role: req.currentUser.rol || req.currentUser.role,
+        sirenEnabled: req.body.siren_enabled || false
+      });
 
       if (req.currentUser.rol === "ambulancia") {
         req.io.emit("ambulance-position", positionData);
       }
+
+      console.log(`📡 Posición redundante emitida para usuario ${req.currentUser.nombre}`);
     }
   } catch (error) {
     next(error);

@@ -15,15 +15,32 @@ function toUserResponse(user) {
   }
 
   const raw = typeof user.toObject === "function" ? user.toObject() : { ...user };
+  const ubicacion = raw.ubicacion || {};
+
   return {
     ...raw,
-    id: raw._id,
+    id: raw._id.toString(),
+    _id: raw._id.toString(),
+    userId: raw._id.toString(),
+    uid: raw._id.toString(),
+
     name: raw.nombre || "",
+    nombre: raw.nombre || "",
     displayName: raw.nombre || "",
+
     role: raw.rol || "",
-    // Mapeo explícito para Flutter
-    lat: raw.ubicacion?.lat || null,
-    lng: raw.ubicacion?.lng || null
+    rol: raw.rol || "",
+
+    // Redundancia de ubicación para evitar nulls en el Admin/Mapa
+    lat: ubicacion.lat ?? null,
+    lng: ubicacion.lng ?? null,
+    latitude: ubicacion.lat ?? null,
+    longitude: ubicacion.lng ?? null,
+
+    ubicacion: {
+      lat: ubicacion.lat ?? null,
+      lng: ubicacion.lng ?? null
+    }
   };
 }
 
@@ -70,14 +87,14 @@ function normalizeUserPayload(payload = {}, { partial = false } = {}) {
       : [];
   }
 
-  // Soporte para ubicación (lat/lng)
-  if (payload.ubicacion !== undefined || payload.lat !== undefined || payload.lng !== undefined) {
-    const lat = payload.ubicacion?.lat ?? payload.lat;
-    const lng = payload.ubicacion?.lng ?? payload.lng;
+  // Soporte robusto para ubicación en la actualización manual
+  const lat = payload.ubicacion?.lat ?? payload.lat ?? payload.latitude;
+  const lng = payload.ubicacion?.lng ?? payload.lng ?? payload.longitude;
 
+  if (lat !== undefined || lng !== undefined) {
     normalized.ubicacion = {
-      lat: lat !== undefined ? Number(lat) : null,
-      lng: lng !== undefined ? Number(lng) : null
+      lat: lat != null ? Number(lat) : null,
+      lng: lng != null ? Number(lng) : null
     };
   }
 

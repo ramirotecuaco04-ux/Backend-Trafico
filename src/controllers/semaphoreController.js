@@ -23,18 +23,15 @@ async function activateSemaphoreOverride(req, res, next) {
 
     if (!intersection_id) throw createHttpError("intersection_id es requerido", 400);
 
-    // 1. Verificar que el semáforo existe
     const light = await TrafficLight.findOne({ name: intersection_id });
     if (!light) throw createHttpError("Semáforo no encontrado en la infraestructura", 404);
 
-    // 2. Evitar duplicados activos
     const existing = await SemaphoreOverride.findOne({ intersection_id, status: "active" });
     if (existing) throw createHttpError("Ya hay una prioridad activa para este semáforo", 409);
 
     const duration = force_green_duration_seconds || 30;
     const expiresAt = new Date(Date.now() + duration * 1000);
 
-    // 3. Crear Override
     const override = await SemaphoreOverride.create({
       intersection_id,
       triggered_by: req.currentUser._id,
@@ -44,7 +41,13 @@ async function activateSemaphoreOverride(req, res, next) {
       status: "active"
     });
 
-    // 3.1. Persistir Alerta en Base de Datos
+    // REPARACIÓN: Obtener coordenadas del semáforo o fallback al usuario
+    const lightLat = light.location?.coordinates ? light.location.coordinates[1] : (light.ubicacion?.lat || null);
+    const lightLng = light.location?.coordinates ? light.location.coordinates[0] : (light.ubicacion?.lng || null);
+
+    const alertLat = lightLat ?? req.currentUser.ubicacion?.lat;
+    const alertLng = lightLng ?? req.currentUser.ubicacion?.lng;
+
     const descriptionText = `Prioridad activada en: ${light.name}`;
     const newAlert = await Alert.create({
       tipo: "ambulancia",
@@ -55,38 +58,24 @@ async function activateSemaphoreOverride(req, res, next) {
       prioridad: "alta",
       intersection_id: intersection_id,
       ubicacion: {
-        lat: light.location?.coordinates ? light.location.coordinates[1] : (light.ubicacion?.lat || null),
-        lng: light.location?.coordinates ? light.location.coordinates[0] : (light.ubicacion?.lng || null)
+        lat: alertLat != null ? Number(alertLat) : null,
+        lng: alertLng != null ? Number(alertLng) : null
       },
       activa: true,
-      read_by: [] // Asegurar que nace sin lecturas
+      read_by: []
     });
 
-    if (newAlert) {
-      console.log("[MSG-SERVER] ¿Se actualizó el registro?: SÍ");
-    }
-
-    // 4. Emisiones Socket.io (Broadcasting a todos con req.io)
     if (req.io) {
-      // Estado dinámico para el mapa
       req.io.emit("emergency-override-active", {
         intersection_id,
         status: "FORCED_GREEN",
         override_id: override._id
       });
 
-      // Mapear la alerta exactamente como el Frontend la espera usando el mapper centralizado
       const alertData = mapAlertForFrontend(newAlert, req.currentUser._id);
-
-      // Emitir el evento 'nueva_alerta' con el objeto persistido y mapeado
       req.io.emit("nueva_alerta", alertData);
-
-      // Emitir también 'notification' por si el Frontend escucha este evento alternativo
       req.io.emit("notification", alertData);
 
-      console.log('✅ Alerta emitida con éxito (nueva_alerta y notification):', alertData);
-
-      // 5. PROGRAMAR LIBERACIÓN AUTOMÁTICA (Para asegurar que el Admin limpie su mapa sin refrescar)
       setTimeout(async () => {
         try {
           await expireOldOverrides(req.io);
@@ -120,19 +109,13 @@ async function releaseSemaphoreOverride(req, res, next) {
     override.release_reason = "manual_cancel_by_user";
     await override.save();
 
-    // Marcar alertas asociadas como inactivas
-    const alertUpdate = await Alert.updateMany({ intersection_id: override.intersection_id, activa: true }, { activa: false });
-    if (alertUpdate.acknowledged) {
-      console.log("[MSG-SERVER] ¿Se actualizó el registro?: SÍ");
-    }
+    await Alert.updateMany({ intersection_id: override.intersection_id, activa: true }, { activa: false });
 
-    // Emisión global para el Admin
     if (req.io) {
       req.io.emit("emergency-override-released", {
         intersection_id: override.intersection_id,
         status: "NORMAL"
       });
-      console.log(`🔓 Prioridad liberada manualmente en: ${override.intersection_id}. Estado NORMAL emitido.`);
     }
 
     sendSuccess(res, { status: "released", intersection_id: override.intersection_id });
@@ -152,7 +135,6 @@ async function getRealtimeSemaphoreState(req, res, next) {
 
     const response = lights.map(l => {
       const ov = activeOverrides.find(o => o.intersection_id === l.name);
-
       return {
         intersection_id: l.name,
         name: l.name,

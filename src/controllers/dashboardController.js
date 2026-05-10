@@ -25,7 +25,6 @@ async function expireOldOverrides(io) {
     item.release_reason = item.release_reason || "auto_timeout";
     await item.save();
 
-    // Desactivar alertas asociadas a la expiración automática
     const alertUpdate = await Alert.updateMany({ intersection_id: item.intersection_id, activa: true }, { activa: false });
 
     if (alertUpdate.acknowledged) {
@@ -33,7 +32,6 @@ async function expireOldOverrides(io) {
     }
 
     if (io) {
-      // 1. Notificación detallada de expiración
       io.emit("semaphore-override", {
         type: "expired",
         override: {
@@ -49,7 +47,6 @@ async function expireOldOverrides(io) {
         }
       });
 
-      // 2. Evento global solicitado para limpiar el estado FORCED_GREEN en el mapa del Admin
       io.emit("emergency-override-released", {
         intersection_id: item.intersection_id,
         status: "NORMAL"
@@ -61,20 +58,51 @@ async function expireOldOverrides(io) {
 }
 
 /**
- * Mapea una alerta del modelo de base de datos al formato esperado por el Frontend (Flutter)
- * Genera dinámicamente titulo, subtitulo y description para evitar "Sin descripción".
+ * Mapea un usuario al formato redundante solicitado para compatibilidad total.
+ */
+function mapUserForFrontend(user) {
+  if (!user) return null;
+  const raw = user.toObject ? user.toObject() : user;
+  const ubicacion = raw.ubicacion || {};
+
+  return {
+    ...raw,
+    id: raw._id.toString(),
+    _id: raw._id.toString(),
+    userId: raw._id.toString(),
+    uid: raw._id.toString(),
+
+    nombre: raw.nombre,
+    name: raw.nombre,
+    displayName: raw.nombre,
+
+    rol: raw.rol,
+    role: raw.rol,
+
+    lat: ubicacion.lat ?? null,
+    lng: ubicacion.lng ?? null,
+    latitude: ubicacion.lat ?? null,
+    longitude: ubicacion.lng ?? null,
+
+    ubicacion: {
+      lat: ubicacion.lat ?? null,
+      lng: ubicacion.lng ?? null
+    }
+  };
+}
+
+/**
+ * Mapea una alerta al formato redundante.
  */
 function mapAlertForFrontend(alert, currentUserId = null) {
   if (!alert) return null;
   const alertObj = alert.toObject ? alert.toObject() : alert;
   const description = alertObj.description || alertObj.mensaje || "Prioridad de paso activada";
 
-  // Calculamos is_read basándonos en si el ID del usuario está en el arreglo read_by
   const isRead = currentUserId && alertObj.read_by
     ? alertObj.read_by.some(id => String(id) === String(currentUserId))
     : false;
 
-  // Normalización de prioridad para el Frontend (Sincronizado con Flutter)
   let prioridadMapped = "medium";
   const p = String(alertObj.prioridad || "").toLowerCase();
   if (p === "alta" || p === "high") {
@@ -85,7 +113,10 @@ function mapAlertForFrontend(alert, currentUserId = null) {
     prioridadMapped = "low";
   }
 
+  const ubicacion = alertObj.ubicacion || {};
+
   return {
+    ...alertObj,
     _id: alertObj._id.toString(),
     id: alertObj._id.toString(),
     tipo: alertObj.tipo || "sistema",
@@ -102,21 +133,27 @@ function mapAlertForFrontend(alert, currentUserId = null) {
     timestamp: alertObj.createdAt || alertObj.timestamp || new Date(),
     createdAt: alertObj.createdAt || alertObj.timestamp || new Date(),
     intersection_id: alertObj.intersection_id,
-    ubicacion: alertObj.ubicacion || null
+
+    // Redundancia de ubicación para alertas
+    lat: ubicacion.lat ?? null,
+    lng: ubicacion.lng ?? null,
+    latitude: ubicacion.lat ?? null,
+    longitude: ubicacion.lng ?? null,
+    ubicacion: {
+      lat: ubicacion.lat ?? null,
+      lng: ubicacion.lng ?? null
+    }
   };
 }
 
 async function buildRealtimeIntersectionState() {
-  // 1. Obtener todos los semáforos registrados (Infraestructura base)
   const allLights = await TrafficLight.find({}).lean();
 
-  // 2. Obtener el tráfico más reciente
   const latestTraffic = await Traffic.find({})
     .sort({ timestamp: -1 })
     .limit(100)
     .lean();
 
-  // 3. Obtener overrides activos
   const activeOverrides = await SemaphoreOverride.find({
     status: "active",
     expires_at: { $gt: new Date() }
@@ -124,7 +161,6 @@ async function buildRealtimeIntersectionState() {
 
   const stateMap = new Map();
 
-  // Inicializar el mapa con todos los semáforos de la base de datos
   for (const light of allLights) {
     stateMap.set(light.name, {
       intersection_id: light.name,
@@ -135,13 +171,14 @@ async function buildRealtimeIntersectionState() {
       pedestrian_count: 0,
       timestamp: light.updatedAt || new Date(),
       override: null,
-      lat: light.location?.coordinates ? light.location.coordinates[1] : null,
-      lng: light.location?.coordinates ? light.location.coordinates[0] : null,
+      lat: light.location?.coordinates ? light.location.coordinates[1] : (light.ubicacion?.lat || null),
+      lng: light.location?.coordinates ? light.location.coordinates[0] : (light.ubicacion?.lng || null),
+      latitude: light.location?.coordinates ? light.location.coordinates[1] : (light.ubicacion?.lat || null),
+      longitude: light.location?.coordinates ? light.location.coordinates[0] : (light.ubicacion?.lng || null),
       is_active: light.is_active
     });
   }
 
-  // Actualizar con datos de tráfico reales si existen
   for (const record of latestTraffic) {
     const existing = stateMap.get(record.intersection_id);
     if (existing) {
@@ -165,12 +202,13 @@ async function buildRealtimeIntersectionState() {
         override: null,
         lat: record.ubicacion?.lat || null,
         lng: record.ubicacion?.lng || null,
+        latitude: record.ubicacion?.lat || null,
+        longitude: record.ubicacion?.lng || null,
         is_active: true
       });
     }
   }
 
-  // Aplicar Overrides (Prioridad máxima)
   for (const override of activeOverrides) {
     const current = stateMap.get(override.intersection_id) || {
       intersection_id: override.intersection_id,
@@ -219,7 +257,6 @@ async function getAdminDashboard(req, res, next) {
       totalUnreadAlerts
     ] = await Promise.all([
       Traffic.find({}).sort({ timestamp: -1 }).limit(20).lean(),
-      // Muestra solo las 10 más recientes para la lista
       Alert.find({ activa: true, read_by: { $ne: userId } }).sort({ createdAt: -1 }).limit(10),
       SemaphoreOverride.find({ status: "active", expires_at: { $gt: new Date() } })
         .populate("triggered_by", "nombre rol")
@@ -232,7 +269,6 @@ async function getAdminDashboard(req, res, next) {
         .limit(10)
         .populate("from_user", "nombre rol")
         .populate("to_user", "nombre rol"),
-      // Contador real sin límite (ESTO ES LO QUE EL FRONTEND NECESITA)
       Alert.countDocuments({ activa: true, read_by: { $ne: userId } })
     ]);
 
@@ -242,7 +278,7 @@ async function getAdminDashboard(req, res, next) {
     sendSuccess(res, {
       totals: {
         intersections: intersections.length,
-        active_alerts: totalUnreadAlerts, // Conteo real y persistente
+        active_alerts: totalUnreadAlerts,
         active_overrides: activeOverrides.length,
         users: users.length,
         online_devices: onlineDevices,
@@ -256,18 +292,7 @@ async function getAdminDashboard(req, res, next) {
       recent_reports: recentReports,
       recent_messages: recentMessages,
       latest_traffic: latestTraffic,
-      users_summary: users.map((user) => ({
-        _id: user._id,
-        id: user._id,
-        nombre: user.nombre,
-        name: user.nombre,
-        displayName: user.nombre,
-        rol: user.rol,
-        role: user.rol,
-        estado: user.estado,
-        last_seen_at: user.last_seen_at,
-        ubicacion: user.ubicacion || null
-      }))
+      users_summary: users.map(mapUserForFrontend)
     });
   } catch (error) {
     next(error);
@@ -280,7 +305,6 @@ async function getVialidadDashboard(req, res, next) {
     const currentUserId = req.currentUser._id;
 
     const [activeAlerts, messages, ownReports, intersections, totalUnreadAlerts] = await Promise.all([
-      // Lista de alerts recientes
       Alert.find({ activa: true, read_by: { $ne: currentUserId } }).sort({ createdAt: -1 }).limit(20),
       OperationalMessage.find({
         $or: [
@@ -312,15 +336,9 @@ async function getVialidadDashboard(req, res, next) {
     ).length;
 
     sendSuccess(res, {
-      profile: {
-        _id: req.currentUser._id,
-        nombre: req.currentUser.nombre,
-        rol: req.currentUser.rol,
-        ubicacion: req.currentUser.ubicacion || null,
-        assigned_intersections: req.currentUser.assigned_intersections || []
-      },
+      profile: mapUserForFrontend(req.currentUser),
       counters: {
-        active_alerts: totalUnreadAlerts, // Conteo real y persistente
+        active_alerts: totalUnreadAlerts,
         unread_messages: unreadMessages,
         reports_visible: ownReports.length
       },
@@ -347,22 +365,14 @@ async function getAmbulanciaDashboard(req, res, next) {
         status: "active",
         expires_at: { $gt: new Date() }
       }).sort({ createdAt: -1 }),
-      // Solo alertas no leídas por el usuario actual
       Alert.find({ activa: true, read_by: { $ne: userId } }).sort({ createdAt: -1 }).limit(5),
       Alert.countDocuments({ activa: true, read_by: { $ne: userId } })
     ]);
 
     sendSuccess(res, {
-      profile: {
-        _id: req.currentUser._id,
-        nombre: req.currentUser.nombre,
-        rol: req.currentUser.rol,
-        siren_enabled: req.currentUser.siren_enabled,
-        ubicacion: req.currentUser.ubicacion || null,
-        assigned_intersections: req.currentUser.assigned_intersections || []
-      },
+      profile: mapUserForFrontend(req.currentUser),
       counters: {
-        active_alerts: totalUnreadAlerts // Conteo real y persistente
+        active_alerts: totalUnreadAlerts
       },
       active_alerts: activeAlerts.map(a => mapAlertForFrontend(a, userId)),
       current_override: currentOverride,
