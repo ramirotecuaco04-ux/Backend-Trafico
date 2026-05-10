@@ -3,7 +3,8 @@ const mongoose = require("mongoose");
 const alertSchema = new mongoose.Schema({
   tipo: {
     type: String,
-    enum: ["ambulancia", "admin", "sistema", "override"],
+    enum: ["ambulancia", "admin", "sistema", "override", "prioridad"],
+    required: true,
     default: "sistema"
   },
   mensaje: {
@@ -21,17 +22,19 @@ const alertSchema = new mongoose.Schema({
   prioridad: {
     type: String,
     enum: ["baja", "media", "alta", "critica"],
-    default: "media"
+    default: "media",
+    required: false
   },
-  intersection_id: { type: String, trim: true, default: null },
+  intersection_id: { type: String, trim: true, default: null, required: false },
   ubicacion: {
-    lat: { type: Number, default: null },
-    lng: { type: Number, default: null }
+    lat: { type: Number, default: null, required: false },
+    lng: { type: Number, default: null, required: false }
   },
-  activa: { type: Boolean, default: true },
+  activa: { type: Boolean, default: true, required: false },
   read_by: {
     type: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
-    default: []
+    default: [],
+    required: false
   }
 }, { timestamps: true });
 

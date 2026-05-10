@@ -62,6 +62,10 @@ async function activateSemaphoreOverride(req, res, next) {
       read_by: [] // Asegurar que nace sin lecturas
     });
 
+    if (newAlert) {
+      console.log("[MSG-SERVER] ¿Se actualizó el registro?: SÍ");
+    }
+
     // 4. Emisiones Socket.io (Broadcasting a todos con req.io)
     if (req.io) {
       // Estado dinámico para el mapa
@@ -121,7 +125,10 @@ async function releaseSemaphoreOverride(req, res, next) {
     await override.save();
 
     // Marcar alertas asociadas como inactivas
-    await Alert.updateMany({ intersection_id: override.intersection_id, activa: true }, { activa: false });
+    const alertUpdate = await Alert.updateMany({ intersection_id: override.intersection_id, activa: true }, { activa: false });
+    if (alertUpdate.acknowledged) {
+      console.log("[MSG-SERVER] ¿Se actualizó el registro?: SÍ");
+    }
 
     // Emisión global para el Admin
     if (req.io) {

@@ -26,7 +26,11 @@ async function expireOldOverrides(io) {
     await item.save();
 
     // Desactivar alertas asociadas a la expiración automática
-    await Alert.updateMany({ intersection_id: item.intersection_id, activa: true }, { activa: false });
+    const alertUpdate = await Alert.updateMany({ intersection_id: item.intersection_id, activa: true }, { activa: false });
+
+    if (alertUpdate.acknowledged) {
+      console.log("[MSG-SERVER] ¿Se actualizó el registro?: SÍ");
+    }
 
     if (io) {
       // 1. Notificación detallada de expiración
