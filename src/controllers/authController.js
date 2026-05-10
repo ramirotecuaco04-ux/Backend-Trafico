@@ -38,14 +38,12 @@ async function updatePresence(req, res, next) {
     }
 
     // 2. Lógica de Candidatos: Filtrar semáforos estáticos a < 300m
-    // AJUSTE: Quitamos el filtro is_active para que la ambulancia detecte candidatos siempre
     const allLights = await TrafficLight.find().lean();
 
     let candidateLights = [];
     if (lat !== undefined && lng !== undefined) {
       candidateLights = allLights
         .map(light => {
-          // Extraer coordenadas de GeoJSON o de campo ubicacion antiguo
           const lightLat = light.location?.coordinates ? light.location.coordinates[1] : (light.ubicacion?.lat || null);
           const lightLng = light.location?.coordinates ? light.location.coordinates[0] : (light.ubicacion?.lng || null);
 
@@ -70,14 +68,23 @@ async function updatePresence(req, res, next) {
       count: candidateLights.length
     });
 
-    // 4. Emitir a otros (Centro de Control)
+    // 4. Emisiones Socket.io (Broadcasting para el Centro de Control / Admin)
     if (req.io && lat !== undefined && lng !== undefined) {
-      req.io.emit("ambulance-position", {
+      const positionData = {
         userId: req.currentUser._id,
         lat,
         lng,
+        role: req.currentUser.rol,
         candidates: candidateLights.map(c => c.id)
-      });
+      };
+
+      // Evento solicitado para el mapa táctico del Admin
+      req.io.emit("position_update", positionData);
+
+      // Mantener compatibilidad con eventos específicos si es necesario
+      if (req.currentUser.rol === "ambulancia") {
+        req.io.emit("ambulance-position", positionData);
+      }
     }
   } catch (error) {
     next(error);

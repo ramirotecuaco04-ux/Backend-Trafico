@@ -229,10 +229,37 @@ async function markAllAsRead(req, res, next) {
   }
 }
 
+/**
+ * Descarta una alerta poniéndola como inactivas (activa: false).
+ */
+async function dismissAlert(req, res, next) {
+  try {
+    validateObjectId(req.params.id, "alert id");
+    const alert = await Alert.findByIdAndUpdate(
+      req.params.id,
+      { activa: false },
+      { new: true }
+    );
+
+    if (!alert) {
+      throw createHttpError("Alerta no encontrada", 404);
+    }
+
+    if (req.io) {
+      req.io.emit("alert-update", alert);
+    }
+
+    sendSuccess(res, mapAlertResponse(alert, req.currentUser?._id), { message: "Alerta descartada correctamente" });
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   createAlert,
   getAlertById,
   getAlerts,
   updateAlert,
-  markAllAsRead
+  markAllAsRead,
+  dismissAlert
 };

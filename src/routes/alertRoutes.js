@@ -4,7 +4,8 @@ const {
   getAlertById,
   getAlerts,
   updateAlert,
-  markAllAsRead
+  markAllAsRead,
+  dismissAlert
 } = require("../controllers/alertController");
 const { requireAuth, requireRole } = require("../middleware/auth");
 
@@ -16,6 +17,11 @@ router.get("/", requireAuth, requireRole("admin", "vialidad", "ambulancia"), get
 router.patch("/read-all", requireAuth, requireRole("admin", "vialidad", "ambulancia"), markAllAsRead);
 router.get("/:id", requireAuth, requireRole("admin", "vialidad", "ambulancia"), getAlertById);
 router.post("/", requireAuth, requireRole("admin", "vialidad", "ambulancia"), createAlert);
+
+// Descarte de alerta (Persistente)
+router.patch("/:id/dismiss", requireAuth, requireRole("admin", "vialidad"), dismissAlert);
+
+// Edición general de la alerta (solo admin)
 router.patch("/:id", requireAuth, requireRole("admin"), updateAlert);
 
 module.exports = router;
