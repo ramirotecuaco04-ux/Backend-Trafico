@@ -12,18 +12,13 @@ const {
 
 /**
  * Mapea la alerta para el cliente, calculando el estado de lectura y ocultando datos internos de DB.
- * Garantiza que el Frontend reciba una bandera 'is_read' clara y permanente.
  */
 function mapAlertResponse(alert, userId) {
   const alertObj = alert.toObject ? alert.toObject() : alert;
-
-  // Calculamos is_read basándonos en si el ID del usuario está en el arreglo read_by
-  // Si no hay userId o no hay read_by, por defecto es false (no leída).
   const is_read = userId && alertObj.read_by
     ? alertObj.read_by.some(id => String(id) === String(userId))
     : false;
 
-  // Eliminamos el arreglo read_by para no exponer IDs de otros usuarios y mantener el JSON limpio
   delete alertObj.read_by;
 
   return {
@@ -32,32 +27,58 @@ function mapAlertResponse(alert, userId) {
   };
 }
 
+/**
+ * Normaliza el payload de la alerta.
+ * Se asegura de que para el tipo 'override' no se exijan campos de emergencia de ambulancia.
+ */
 function normalizeAlertPayload(payload = {}, { partial = false } = {}) {
   const normalized = {};
 
-  // Mensaje ahora es opcional para evitar errores 400 si el frontend no lo envía (usa description/titulo)
+  // Determinamos el tipo para ajustar la validación
+  if (payload.tipo !== undefined) {
+    let tipo = String(payload.tipo).trim().toLowerCase();
+    if (tipo === "ambulance") tipo = "ambulancia";
+    normalized.tipo = tipo;
+  }
+
+  const isOverride = normalized.tipo === "override";
+
+  // Mensaje y descripción
   if (!partial || payload.mensaje !== undefined) {
     normalized.mensaje = normalizeTrimmedString(payload.mensaje, "mensaje", { required: false });
   }
+  if (payload.description !== undefined) {
+    normalized.description = normalizeTrimmedString(payload.description, "description");
+  }
 
-  if (payload.tipo !== undefined) normalized.tipo = String(payload.tipo).trim();
-  if (payload.prioridad !== undefined) normalized.prioridad = String(payload.prioridad).trim();
+  // Prioridad con mapeo para compatibilidad con Frontend (Flutter usa high/low)
+  if (payload.prioridad !== undefined) {
+    let prio = String(payload.prioridad).trim().toLowerCase();
+    if (prio === "high") prio = "alta";
+    if (prio === "medium") prio = "media";
+    if (prio === "low") prio = "baja";
+    normalized.prioridad = prio;
+  }
+
   if (payload.intersection_id !== undefined) {
     normalized.intersection_id = payload.intersection_id ? String(payload.intersection_id).trim() : null;
   }
-  if (payload.activa !== undefined) normalized.activa = Boolean(payload.activa);
 
-  // Soporte para campos extendidos que envía el Frontend
+  if (payload.activa !== undefined) {
+    normalized.activa = normalizeBoolean(payload.activa, "activa");
+  }
+
+  // Título y subtítulo
   if (payload.titulo !== undefined) normalized.titulo = normalizeTrimmedString(payload.titulo, "titulo");
   if (payload.subtitulo !== undefined) normalized.subtitulo = normalizeTrimmedString(payload.subtitulo, "subtitulo");
-  if (payload.description !== undefined) normalized.description = normalizeTrimmedString(payload.description, "description");
 
   if (payload.ubicacion !== undefined) {
     normalized.ubicacion = {
-      lat: payload.ubicacion?.lat ?? null,
-      lng: payload.ubicacion?.lng ?? null
+      lat: (payload.ubicacion?.lat != null) ? Number(payload.ubicacion.lat) : null,
+      lng: (payload.ubicacion?.lng != null) ? Number(payload.ubicacion.lng) : null
     };
   }
+
   return normalized;
 }
 
@@ -70,28 +91,42 @@ async function createAlert(req, res, next) {
 
     const payload = normalizeAlertPayload(req.body);
 
-    // Ajuste de emergencia (ambulancia)
-    if (payload.tipo === "ambulance" || payload.tipo === "ambulancia" || req.currentUser.rol === "ambulancia") {
-      payload.activa = true;
-      if (!payload.tipo || payload.tipo === "ambulance") payload.tipo = "ambulancia";
-      if (!payload.prioridad) payload.prioridad = "alta";
+    // Identificar si es una alerta de emergencia o prioridad manual
+    const isAmbulance = payload.tipo === "ambulancia" || req.currentUser.rol === "ambulancia";
+    const isOverride = payload.tipo === "override";
+    const isEmergency = isAmbulance || isOverride;
 
-      // Si no hay mensaje pero hay título/descripción, los usamos como fallback
+    if (isEmergency) {
+      payload.activa = true;
+
+      // Normalización de tipos
+      if (!payload.tipo) {
+        payload.tipo = isAmbulance ? "ambulancia" : "override";
+      }
+
+      // Prioridad por defecto
+      if (!payload.prioridad) {
+        payload.prioridad = isAmbulance ? "alta" : "media";
+      }
+
+      // Fallbacks para contenido visual (Evita que el frontend muestre campos vacíos)
+      if (!payload.titulo) {
+        payload.titulo = isOverride ? "PRIORIDAD DE PASO" : "¡EMERGENCIA DETECTADA!";
+      }
+
       if (!payload.mensaje) {
-        payload.mensaje = payload.titulo || payload.description || "Alerta de emergencia";
+        payload.mensaje = payload.description ||
+          (isOverride ? "Prioridad activada por administrador" : "Alerta de emergencia en curso");
       }
     }
 
-    // Garantizamos que el arreglo de leídos esté vacío al crear una nueva alerta
     payload.read_by = [];
-
     const alert = await Alert.create(payload);
 
     if (req.io) {
-      // Emitimos la alerta mapeada para que el frontend la reciba con is_read: false inmediatamente
       const alertData = mapAlertResponse(alert, req.currentUser._id);
-      req.io.emit("alert-update", alert); // Evento técnico
-      req.io.emit("nueva_alerta", alertData); // Evento de negocio
+      req.io.emit("alert-update", alert);
+      req.io.emit("nueva_alerta", alertData);
     }
 
     sendSuccess(res, mapAlertResponse(alert, req.currentUser._id), { event_emitted: true }, 201);
@@ -109,18 +144,14 @@ async function getAlerts(req, res, next) {
     const query = {};
     const userId = req.currentUser?._id;
 
-    // Filtro por estado activo (incidente en curso)
     if (req.query.activa !== undefined) {
       const isActive = normalizeBoolean(req.query.activa, "activa");
       query.activa = isActive;
-
-      // Si se piden alertas activas (pendientes), por defecto excluimos las ya leídas por el usuario
       if (isActive && userId && req.query.include_read !== 'true') {
         query.read_by = { $ne: userId };
       }
     }
 
-    // Filtro explícito para alertas NO leídas (alias de utilidad)
     if ((req.query.unread === "true" || req.query.only_unread === "true") && userId) {
       query.read_by = { $ne: userId };
     }
@@ -181,9 +212,6 @@ async function updateAlert(req, res, next) {
   }
 }
 
-/**
- * Marca todas las alertas como leídas para el usuario actual.
- */
 async function markAllAsRead(req, res, next) {
   try {
     const userId = req.currentUser._id;

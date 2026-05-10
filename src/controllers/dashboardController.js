@@ -73,7 +73,10 @@ function mapAlertForFrontend(alert, currentUserId = null) {
   return {
     id: alertObj._id.toString(),
     tipo: alertObj.tipo || "sistema",
-    titulo: alertObj.titulo || (alertObj.tipo === "ambulancia" ? "¡EMERGENCIA DETECTADA!" : "ALERTA DE SISTEMA"),
+    titulo: alertObj.titulo || (
+      alertObj.tipo === "ambulancia" ? "¡EMERGENCIA DETECTADA!" :
+      (alertObj.tipo === "override" ? "PRIORIDAD DE PASO" : "ALERTA DE SISTEMA")
+    ),
     subtitulo: alertObj.subtitulo || (alertObj.intersection_id ? "Intersección: " + alertObj.intersection_id : "Aviso General"),
     mensaje: alertObj.mensaje || description,
     description: description, // Campo clave para el feed de Flutter (¡Evita 'Sin descripción'!)
@@ -229,7 +232,7 @@ async function getAdminDashboard(req, res, next) {
       },
       intersections,
       semaphores: intersections,
-      active_alerts: activeAlerts.map(a => mapAlertForFrontend(a, userId)),
+      active_alerts: activeAlerts.map(a \u003d\u003e mapAlertForFrontend(a, userId)),
       active_overrides: activeOverrides,
       recent_reports: recentReports,
       recent_messages: recentMessages,
@@ -302,7 +305,7 @@ async function getVialidadDashboard(req, res, next) {
         unread_messages: unreadMessages,
         reports_visible: ownReports.length
       },
-      active_alerts: activeAlerts.map(a => mapAlertForFrontend(a, currentUserId)),
+      active_alerts: activeAlerts.map(a \u003d\u003e mapAlertForFrontend(a, currentUserId)),
       messages,
       reports: ownReports,
       intersections,
@@ -342,7 +345,7 @@ async function getAmbulanciaDashboard(req, res, next) {
       counters: {
         active_alerts: totalUnreadAlerts // Conteo real y persistente
       },
-      active_alerts: activeAlerts.map(a => mapAlertForFrontend(a, userId)),
+      active_alerts: activeAlerts.map(a \u003d\u003e mapAlertForFrontend(a, userId)),
       current_override: currentOverride,
       intersections,
       semaphores: intersections,
