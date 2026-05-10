@@ -72,7 +72,7 @@ async function createAlert(req, res, next) {
       req.io.emit("alert-update", alert);
       req.io.emit("nueva_alerta", {
         ...alert.toObject(),
-        description: alert.mensaje, // Asegurar compatibilidad en tiempo real
+        description: alert.mensaje,
         created_by_role: req.currentUser.rol
       });
     }
@@ -111,19 +111,18 @@ async function getAlerts(req, res, next) {
 
     if (startDate || endDate) {
       query.createdAt = {};
-
-      if (startDate) {
-        query.createdAt.$gte = startDate;
-      }
-
-      if (endDate) {
-        query.createdAt.$lte = endDate;
-      }
+      if (startDate) query.createdAt.$gte = startDate;
+      if (endDate) query.createdAt.$lte = endDate;
     }
 
-    const [alerts, total] = await Promise.all([
+    const [alerts, total, unreadCount] = await Promise.all([
       Alert.find(query).sort({ createdAt: sortDirection }).skip(skip).limit(limit),
-      Alert.countDocuments(query)
+      Alert.countDocuments(query),
+      // Contar alertas activas no leídas por el usuario actual
+      Alert.countDocuments({
+        activa: true,
+        read_by: { $ne: req.currentUser._id }
+      })
     ]);
 
     sendSuccess(res, alerts, {
@@ -131,7 +130,9 @@ async function getAlerts(req, res, next) {
       total,
       page,
       limit,
-      total_pages: Math.max(1, Math.ceil(total / limit))
+      total_pages: Math.max(1, Math.ceil(total / limit)),
+      unread_count: unreadCount,
+      has_new: unreadCount > 0 // Propiedad solicitada para el punto rojo en el frontend
     });
   } catch (error) {
     next(error);
@@ -145,6 +146,12 @@ async function getAlertById(req, res, next) {
 
     if (!alert) {
       throw createHttpError("Alerta no encontrada", 404);
+    }
+
+    // Marcar como leída individualmente al consultar el detalle
+    if (!alert.read_by.includes(req.currentUser._id)) {
+      alert.read_by.push(req.currentUser._id);
+      await alert.save();
     }
 
     sendSuccess(res, alert);
@@ -176,11 +183,24 @@ async function updateAlert(req, res, next) {
 }
 
 /**
- * Marca todas las alertas como inactivas (leídas)
+ * Marca todas las alertas como leídas para el usuario actual.
+ * Si el usuario es Admin, también las marca como inactivas globalmente para limpiar el feed.
  */
 async function markAllAsRead(req, res, next) {
   try {
-    await Alert.updateMany({ activa: true }, { $set: { activa: false } });
+    const userId = req.currentUser._id;
+
+    // 1. Agregar el ID del usuario a la lista de 'leído por'
+    await Alert.updateMany(
+      { activa: true, read_by: { $ne: userId } },
+      { $addToSet: { read_by: userId } }
+    );
+
+    // 2. Si es Admin o Vialidad, podemos desactivarlas globalmente para limpiar la vista de emergencia
+    // (Dependiendo de si queremos que el estado de 'emergencia' persista hasta que alguien lo cierre)
+    if (req.currentUser.rol === "admin") {
+      await Alert.updateMany({ activa: true }, { $set: { activa: false } });
+    }
 
     if (req.io) {
       req.io.emit("alerts-cleared", { by: req.currentUser.nombre });
