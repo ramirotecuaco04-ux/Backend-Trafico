@@ -64,7 +64,11 @@ function mapAlertForFrontend(alert, currentUserId = null) {
   const alertObj = alert.toObject ? alert.toObject() : alert;
   const description = alertObj.description || alertObj.mensaje || "Prioridad de paso activada";
 
-  const isRead = currentUserId && alertObj.read_by && alertObj.read_by.some(id => String(id) === String(currentUserId));
+  // Calculamos is_read basándonos en si el ID del usuario está en el arreglo read_by
+  // Si no hay currentUserId o no hay read_by, por defecto es false (no leída).
+  const isRead = currentUserId && alertObj.read_by
+    ? alertObj.read_by.some(id => String(id) === String(currentUserId))
+    : false;
 
   return {
     id: alertObj._id.toString(),

@@ -18,7 +18,10 @@ function mapAlertResponse(alert, userId) {
   const alertObj = alert.toObject ? alert.toObject() : alert;
 
   // Calculamos is_read basándonos en si el ID del usuario está en el arreglo read_by
-  const is_read = userId ? (alertObj.read_by || []).some(id => String(id) === String(userId)) : false;
+  // Si no hay userId o no hay read_by, por defecto es false (no leída).
+  const is_read = userId && alertObj.read_by
+    ? alertObj.read_by.some(id => String(id) === String(userId))
+    : false;
 
   // Eliminamos el arreglo read_by para no exponer IDs de otros usuarios y mantener el JSON limpio
   delete alertObj.read_by;
@@ -58,16 +61,21 @@ async function createAlert(req, res, next) {
 
     const payload = normalizeAlertPayload(req.body);
 
-    if (payload.tipo === "ambulance" || req.currentUser.rol === "ambulancia") {
+    // Ajuste de emergencia (ambulancia)
+    if (payload.tipo === "ambulance" || payload.tipo === "ambulancia" || req.currentUser.rol === "ambulancia") {
       payload.activa = true;
-      if (!payload.tipo) payload.tipo = "ambulance";
+      if (!payload.tipo || payload.tipo === "ambulance") payload.tipo = "ambulancia";
       if (!payload.prioridad) payload.prioridad = "alta";
     }
+
+    // Garantizamos que el arreglo de leídos esté vacío al crear una nueva alerta
+    payload.read_by = [];
 
     const alert = await Alert.create(payload);
 
     if (req.io) {
       // Emitimos la alerta mapeada para que el frontend la reciba con is_read: false inmediatamente
+      // Usamos el ID del usuario actual para el mapeo, pero como read_by está vacío, será false para todos.
       const alertData = mapAlertResponse(alert, req.currentUser._id);
       req.io.emit("alert-update", alert); // Evento técnico
       req.io.emit("nueva_alerta", alertData); // Evento de negocio

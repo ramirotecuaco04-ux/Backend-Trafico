@@ -58,7 +58,8 @@ async function activateSemaphoreOverride(req, res, next) {
         lat: light.location?.coordinates ? light.location.coordinates[1] : (light.ubicacion?.lat || null),
         lng: light.location?.coordinates ? light.location.coordinates[0] : (light.ubicacion?.lng || null)
       },
-      activa: true
+      activa: true,
+      read_by: [] // Asegurar que nace sin lecturas
     });
 
     // 4. Emisiones Socket.io (Broadcasting a todos con req.io)
@@ -78,7 +79,8 @@ async function activateSemaphoreOverride(req, res, next) {
         mensaje: descriptionText,
         description: descriptionText,
         activa: true,
-        prioridad: "high"
+        prioridad: "high",
+        is_read: false // Importante: Informar explícitamente que es nueva
       };
 
       req.io.emit("nueva_alerta", alertData);

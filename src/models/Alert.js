@@ -21,7 +21,10 @@ const alertSchema = new mongoose.Schema({
     lng: Number
   },
   activa: { type: Boolean, default: true },
-  read_by: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }] // Para rastreo de lectura
+  read_by: {
+    type: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+    default: []
+  } // Para rastreo de lectura, por defecto vacío
 }, { timestamps: true });
 
 module.exports = mongoose.model("Alert", alertSchema);
