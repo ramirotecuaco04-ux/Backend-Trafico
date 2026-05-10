@@ -8,6 +8,25 @@ const {
   validateObjectId
 } = require("../utils/validation");
 
+/**
+ * Mapea el mensaje para el cliente, calculando el estado de lectura (is_read)
+ * para mantener la consistencia con el modelo de Alertas.
+ */
+function mapMessageResponse(message, userId) {
+  const msgObj = message.toObject ? message.toObject() : message;
+  const is_read = userId && msgObj.read_by
+    ? msgObj.read_by.some(id => String(id) === String(userId))
+    : false;
+
+  // Eliminamos read_by para no exponer IDs internos y mantener consistencia con alertas
+  delete msgObj.read_by;
+
+  return {
+    ...msgObj,
+    is_read: !!is_read
+  };
+}
+
 function normalizeMessagePayload(payload = {}) {
   const body = normalizeTrimmedString(payload.body, "body", { required: true });
   const subject = normalizeTrimmedString(payload.subject, "subject") || "";
@@ -40,11 +59,13 @@ async function createMessage(req, res, next) {
       .populate("from_user", "nombre rol")
       .populate("to_user", "nombre rol");
 
+    const mapped = mapMessageResponse(populated, req.currentUser._id);
+
     if (req.io) {
-      req.io.emit("operational-message", populated);
+      req.io.emit("operational-message", mapped);
     }
 
-    sendSuccess(res, populated, { event_emitted: true }, 201);
+    sendSuccess(res, mapped, { event_emitted: true }, 201);
   } catch (error) {
     next(error);
   }
@@ -57,6 +78,7 @@ async function getMessages(req, res, next) {
     const sortDirection = normalizeSortDirection(req.query.sort);
     const skip = (page - 1) * limit;
     const query = {};
+    const userId = req.currentUser._id;
 
     if (req.currentUser.rol === "admin") {
       if (req.query.to_role) {
@@ -65,9 +87,14 @@ async function getMessages(req, res, next) {
     } else {
       query.$or = [
         { to_role: req.currentUser.rol },
-        { to_user: req.currentUser._id },
-        { from_user: req.currentUser._id }
+        { to_user: userId },
+        { from_user: userId }
       ];
+    }
+
+    // Filtrar solo no leídos si se solicita
+    if (req.query.unread === "true") {
+      query.read_by = { $ne: userId };
     }
 
     const [messages, total] = await Promise.all([
@@ -80,8 +107,10 @@ async function getMessages(req, res, next) {
       OperationalMessage.countDocuments(query)
     ]);
 
-    sendSuccess(res, messages, {
-      count: messages.length,
+    const mappedMessages = messages.map(m => mapMessageResponse(m, userId));
+
+    sendSuccess(res, mappedMessages, {
+      count: mappedMessages.length,
       total,
       page,
       limit,
@@ -95,15 +124,16 @@ async function getMessages(req, res, next) {
 async function markMessageAsRead(req, res, next) {
   try {
     validateObjectId(req.params.id, "message id");
+    const userId = req.currentUser._id;
     const message = await OperationalMessage.findById(req.params.id);
 
     if (!message) {
       throw createHttpError("Mensaje no encontrado", 404);
     }
 
-    const alreadyRead = message.read_by.some((userId) => String(userId) === String(req.currentUser._id));
+    const alreadyRead = message.read_by.some((id) => String(id) === String(userId));
     if (!alreadyRead) {
-      message.read_by.push(req.currentUser._id);
+      message.read_by.push(userId);
       await message.save();
     }
 
@@ -111,7 +141,36 @@ async function markMessageAsRead(req, res, next) {
       .populate("from_user", "nombre rol")
       .populate("to_user", "nombre rol");
 
-    sendSuccess(res, populated);
+    sendSuccess(res, mapMessageResponse(populated, userId));
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function markAllMessagesAsRead(req, res, next) {
+  try {
+    const userId = req.currentUser._id;
+    const userRole = req.currentUser.rol;
+
+    // Buscamos mensajes dirigidos al usuario o a su rol que no hayan sido leídos
+    const query = {
+      $or: [
+        { to_user: userId },
+        { to_role: userRole }
+      ],
+      read_by: { $ne: userId }
+    };
+
+    const result = await OperationalMessage.updateMany(
+      query,
+      { $addToSet: { read_by: userId } }
+    );
+
+    sendSuccess(res, {
+      success: true,
+      message: "Todos los mensajes recibidos han sido marcados como leídos",
+      modified_count: result.modifiedCount || 0
+    });
   } catch (error) {
     next(error);
   }
@@ -120,5 +179,6 @@ async function markMessageAsRead(req, res, next) {
 module.exports = {
   createMessage,
   getMessages,
-  markMessageAsRead
+  markMessageAsRead,
+  markAllMessagesAsRead
 };
