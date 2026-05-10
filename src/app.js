@@ -21,7 +21,11 @@ function createApp() {
   app.use(cors({ origin: corsOrigin }));
   app.use(express.json());
 
+  // Middleware de depuración para ver qué llega al backend
   app.use((req, res, next) => {
+    if (req.method !== 'GET') {
+      console.log(`📥 [${req.method}] ${req.originalUrl} - Datos recibidos:`, JSON.stringify(req.body, null, 2));
+    }
     req.io = req.app.get("io");
     next();
   });

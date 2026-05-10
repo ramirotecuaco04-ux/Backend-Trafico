@@ -41,8 +41,6 @@ function normalizeAlertPayload(payload = {}, { partial = false } = {}) {
     normalized.tipo = tipo;
   }
 
-  const isOverride = normalized.tipo === "override";
-
   // Mensaje y descripción
   if (!partial || payload.mensaje !== undefined) {
     normalized.mensaje = normalizeTrimmedString(payload.mensaje, "mensaje", { required: false });
@@ -72,10 +70,14 @@ function normalizeAlertPayload(payload = {}, { partial = false } = {}) {
   if (payload.titulo !== undefined) normalized.titulo = normalizeTrimmedString(payload.titulo, "titulo");
   if (payload.subtitulo !== undefined) normalized.subtitulo = normalizeTrimmedString(payload.subtitulo, "subtitulo");
 
-  if (payload.ubicacion !== undefined) {
+  // REPARACIÓN: Soporte robusto para ubicación (lat, lng, latitude, longitude, ubicacion)
+  const lat = payload.lat ?? payload.latitude ?? payload.ubicacion?.lat ?? payload.ubicacion?.latitude;
+  const lng = payload.lng ?? payload.longitude ?? payload.ubicacion?.lng ?? payload.ubicacion?.longitude;
+
+  if (lat !== undefined && lat !== null && lng !== undefined && lng !== null) {
     normalized.ubicacion = {
-      lat: (payload.ubicacion?.lat != null) ? Number(payload.ubicacion.lat) : null,
-      lng: (payload.ubicacion?.lng != null) ? Number(payload.ubicacion.lng) : null
+      lat: Number(lat),
+      lng: Number(lng)
     };
   }
 
@@ -99,17 +101,14 @@ async function createAlert(req, res, next) {
     if (isEmergency) {
       payload.activa = true;
 
-      // Normalización de tipos
       if (!payload.tipo) {
         payload.tipo = isAmbulance ? "ambulancia" : "override";
       }
 
-      // Prioridad por defecto
       if (!payload.prioridad) {
         payload.prioridad = isAmbulance ? "alta" : "media";
       }
 
-      // Fallbacks para contenido visual (Evita que el frontend muestre campos vacíos)
       if (!payload.titulo) {
         payload.titulo = isOverride ? "PRIORIDAD DE PASO" : "¡EMERGENCIA DETECTADA!";
       }
@@ -117,6 +116,14 @@ async function createAlert(req, res, next) {
       if (!payload.mensaje) {
         payload.mensaje = payload.description ||
           (isOverride ? "Prioridad activada por administrador" : "Alerta de emergencia en curso");
+      }
+
+      // REPARACIÓN: Extraer ubicación del usuario si no viene en el payload
+      if (!payload.ubicacion && req.currentUser.ubicacion?.lat != null) {
+        payload.ubicacion = {
+          lat: req.currentUser.ubicacion.lat,
+          lng: req.currentUser.ubicacion.lng
+        };
       }
     }
 
@@ -229,9 +236,6 @@ async function markAllAsRead(req, res, next) {
   }
 }
 
-/**
- * Descarta una alerta poniéndola como inactivas (activa: false).
- */
 async function dismissAlert(req, res, next) {
   try {
     validateObjectId(req.params.id, "alert id");

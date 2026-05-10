@@ -27,8 +27,8 @@ const alertSchema = new mongoose.Schema({
   },
   intersection_id: { type: String, trim: true, default: null, required: false },
   ubicacion: {
-    lat: { type: Number, default: null, required: false },
-    lng: { type: Number, default: null, required: false }
+    lat: { type: Number },
+    lng: { type: Number }
   },
   activa: { type: Boolean, default: true, required: false },
   read_by: {

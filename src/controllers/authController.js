@@ -19,29 +19,34 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
 
 async function updatePresence(req, res, next) {
   try {
-    // REPARACIÓN: Extraer lat/lng con Optional Chaining para evitar Error 500
-    // Soporta tanto {lat, lng} como {ubicacion: {lat, lng}}
-    const lat = req.body.lat ?? req.body.ubicacion?.lat;
-    const lng = req.body.lng ?? req.body.ubicacion?.lng;
+    // REPARACIÓN: Extraer lat/lng con soporte para múltiples formatos y nombres (lat, latitude, lng, longitude)
+    const lat = req.body.lat ?? req.body.latitude ?? req.body.ubicacion?.lat ?? req.body.ubicacion?.latitude;
+    const lng = req.body.lng ?? req.body.longitude ?? req.body.ubicacion?.lng ?? req.body.ubicacion?.longitude;
 
-    // 1. Persistir ubicación dinámica (solo si vienen datos)
-    if (lat !== undefined && lng !== undefined) {
-      await User.findByIdAndUpdate(req.currentUser._id, {
-        "ubicacion.lat": lat,
-        "ubicacion.lng": lng,
-        last_seen_at: new Date()
-      });
-    } else {
-      await User.findByIdAndUpdate(req.currentUser._id, {
-        last_seen_at: new Date()
-      });
+    const updateData = {
+      last_seen_at: new Date()
+    };
+
+    // Solo actualizar ubicación si se recibieron valores numéricos válidos
+    if (lat !== undefined && lat !== null && lng !== undefined && lng !== null) {
+      updateData["ubicacion.lat"] = Number(lat);
+      updateData["ubicacion.lng"] = Number(lng);
     }
+
+    const updatedUser = await User.findByIdAndUpdate(
+      req.currentUser._id,
+      { $set: updateData },
+      { new: true }
+    );
 
     // 2. Lógica de Candidatos: Filtrar semáforos estáticos a < 300m
     const allLights = await TrafficLight.find().lean();
 
     let candidateLights = [];
-    if (lat !== undefined && lng !== undefined) {
+    const currentLat = updatedUser.ubicacion?.lat;
+    const currentLng = updatedUser.ubicacion?.lng;
+
+    if (currentLat != null && currentLng != null) {
       candidateLights = allLights
         .map(light => {
           const lightLat = light.location?.coordinates ? light.location.coordinates[1] : (light.ubicacion?.lat || null);
@@ -54,7 +59,7 @@ async function updatePresence(req, res, next) {
             name: light.name,
             lat: lightLat,
             lng: lightLng,
-            distance: calculateDistance(lat, lng, lightLat, lightLng)
+            distance: calculateDistance(currentLat, currentLng, lightLat, lightLng)
           };
         })
         .filter(l => l !== null && l.distance <= 300)
@@ -65,23 +70,22 @@ async function updatePresence(req, res, next) {
     sendSuccess(res, {
       status: "online",
       candidates: candidateLights,
-      count: candidateLights.length
+      count: candidateLights.length,
+      ubicacion: updatedUser.ubicacion // Devolver para confirmación
     });
 
     // 4. Emisiones Socket.io (Broadcasting para el Centro de Control / Admin)
-    if (req.io && lat !== undefined && lng !== undefined) {
+    if (req.io && currentLat != null && currentLng != null) {
       const positionData = {
         userId: req.currentUser._id,
-        lat,
-        lng,
+        lat: currentLat,
+        lng: currentLng,
         role: req.currentUser.rol,
         candidates: candidateLights.map(c => c.id)
       };
 
-      // Evento solicitado para el mapa táctico del Admin
       req.io.emit("position_update", positionData);
 
-      // Mantener compatibilidad con eventos específicos si es necesario
       if (req.currentUser.rol === "ambulancia") {
         req.io.emit("ambulance-position", positionData);
       }
