@@ -10,6 +10,17 @@ const {
   validateObjectId
 } = require("../utils/validation");
 
+/**
+ * Utilidad interna para mapear alertas incluyendo el estado de lectura para el usuario actual.
+ */
+function mapAlertResponse(alert, userId) {
+  const alertObj = alert.toObject ? alert.toObject() : alert;
+  return {
+    ...alertObj,
+    is_read: userId ? alertObj.read_by?.some(id => String(id) === String(userId)) : false
+  };
+}
+
 function normalizeAlertPayload(payload = {}, { partial = false } = {}) {
   const normalized = {};
 
@@ -54,7 +65,6 @@ async function createAlert(req, res, next) {
 
     const payload = normalizeAlertPayload(req.body);
 
-    // Lógica específica para ambulancias
     if (payload.tipo === "ambulance" || req.currentUser.rol === "ambulancia") {
       payload.activa = true;
       if (!payload.tipo) payload.tipo = "ambulance";
@@ -63,16 +73,12 @@ async function createAlert(req, res, next) {
 
     const alert = await Alert.create(payload);
 
-    // Notificación vía WebSockets
     if (req.io) {
       req.io.emit("alert-update", alert);
-      req.io.emit("nueva_alerta", {
-        ...alert.toObject(),
-        created_by_role: req.currentUser.rol
-      });
+      req.io.emit("nueva_alerta", mapAlertResponse(alert, req.currentUser._id));
     }
 
-    sendSuccess(res, alert, { event_emitted: true }, 201);
+    sendSuccess(res, mapAlertResponse(alert, req.currentUser._id), { event_emitted: true }, 201);
   } catch (error) {
     next(error);
   }
@@ -85,42 +91,28 @@ async function getAlerts(req, res, next) {
     const sortDirection = normalizeSortDirection(req.query.sort);
     const skip = (page - 1) * limit;
     const query = {};
-    const startDate = normalizeDate(req.query.start_date, "start_date");
-    const endDate = normalizeDate(req.query.end_date, "end_date");
+    const userId = req.currentUser?._id;
 
     if (req.query.activa !== undefined) {
       const isActive = normalizeBoolean(req.query.activa, "activa");
       query.activa = isActive;
 
       // Si se piden alertas activas, filtramos las que ya leyó este usuario específico
-      // para que no cuenten en el contador de pendientes del frontend.
-      if (isActive && req.currentUser) {
-        query.read_by = { $ne: req.currentUser._id };
+      // para que no cuenten como pendientes en el contador del frontend.
+      if (isActive && userId) {
+        query.read_by = { $ne: userId };
       }
     }
 
-    if (req.query.tipo) {
-      query.tipo = String(req.query.tipo).trim();
-    }
+    if (req.query.tipo) query.tipo = String(req.query.tipo).trim();
+    if (req.query.prioridad) query.prioridad = String(req.query.prioridad).trim();
 
-    if (req.query.prioridad) {
-      query.prioridad = String(req.query.prioridad).trim();
-    }
-
-    if (req.query.intersection_id) {
-      query.intersection_id = String(req.query.intersection_id).trim();
-    }
-
+    const startDate = normalizeDate(req.query.start_date, "start_date");
+    const endDate = normalizeDate(req.query.end_date, "end_date");
     if (startDate || endDate) {
       query.createdAt = {};
-
-      if (startDate) {
-        query.createdAt.$gte = startDate;
-      }
-
-      if (endDate) {
-        query.createdAt.$lte = endDate;
-      }
+      if (startDate) query.createdAt.$gte = startDate;
+      if (endDate) query.createdAt.$lte = endDate;
     }
 
     const [alerts, total] = await Promise.all([
@@ -128,8 +120,10 @@ async function getAlerts(req, res, next) {
       Alert.countDocuments(query)
     ]);
 
-    sendSuccess(res, alerts, {
-      count: alerts.length,
+    const mappedAlerts = alerts.map(a => mapAlertResponse(a, userId));
+
+    sendSuccess(res, mappedAlerts, {
+      count: mappedAlerts.length,
       total,
       page,
       limit,
@@ -149,7 +143,7 @@ async function getAlertById(req, res, next) {
       throw createHttpError("Alerta no encontrada", 404);
     }
 
-    sendSuccess(res, alert);
+    sendSuccess(res, mapAlertResponse(alert, req.currentUser?._id));
   } catch (error) {
     next(error);
   }
@@ -171,20 +165,17 @@ async function updateAlert(req, res, next) {
       req.io.emit("alert-update", alert);
     }
 
-    sendSuccess(res, alert, { event_emitted: true });
+    sendSuccess(res, mapAlertResponse(alert, req.currentUser?._id), { event_emitted: true });
   } catch (error) {
     next(error);
   }
 }
 
-/**
- * Marca todas las alertas activas como leídas para el usuario actual.
- */
 async function markAllAsRead(req, res, next) {
   try {
     const userId = req.currentUser._id;
 
-    // Agregamos al usuario actual a la lista de "read_by" para todas las alertas activas
+    // Marcamos todas las alertas activas como leídas por este usuario
     await Alert.updateMany(
       { activa: true, read_by: { $ne: userId } },
       { $addToSet: { read_by: userId } }
