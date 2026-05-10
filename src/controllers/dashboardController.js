@@ -232,7 +232,7 @@ async function getAdminDashboard(req, res, next) {
       },
       intersections,
       semaphores: intersections,
-      active_alerts: activeAlerts.map(a \u003d\u003e mapAlertForFrontend(a, userId)),
+      active_alerts: activeAlerts.map(a => mapAlertForFrontend(a, userId)),
       active_overrides: activeOverrides,
       recent_reports: recentReports,
       recent_messages: recentMessages,
@@ -305,7 +305,7 @@ async function getVialidadDashboard(req, res, next) {
         unread_messages: unreadMessages,
         reports_visible: ownReports.length
       },
-      active_alerts: activeAlerts.map(a \u003d\u003e mapAlertForFrontend(a, currentUserId)),
+      active_alerts: activeAlerts.map(a => mapAlertForFrontend(a, currentUserId)),
       messages,
       reports: ownReports,
       intersections,
@@ -345,7 +345,7 @@ async function getAmbulanciaDashboard(req, res, next) {
       counters: {
         active_alerts: totalUnreadAlerts // Conteo real y persistente
       },
-      active_alerts: activeAlerts.map(a \u003d\u003e mapAlertForFrontend(a, userId)),
+      active_alerts: activeAlerts.map(a => mapAlertForFrontend(a, userId)),
       current_override: currentOverride,
       intersections,
       semaphores: intersections,
