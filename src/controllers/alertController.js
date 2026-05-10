@@ -34,15 +34,24 @@ function mapAlertResponse(alert, userId) {
 
 function normalizeAlertPayload(payload = {}, { partial = false } = {}) {
   const normalized = {};
+
+  // Mensaje ahora es opcional para evitar errores 400 si el frontend no lo envía (usa description/titulo)
   if (!partial || payload.mensaje !== undefined) {
-    normalized.mensaje = normalizeTrimmedString(payload.mensaje, "mensaje", { required: true });
+    normalized.mensaje = normalizeTrimmedString(payload.mensaje, "mensaje", { required: false });
   }
+
   if (payload.tipo !== undefined) normalized.tipo = String(payload.tipo).trim();
   if (payload.prioridad !== undefined) normalized.prioridad = String(payload.prioridad).trim();
   if (payload.intersection_id !== undefined) {
     normalized.intersection_id = payload.intersection_id ? String(payload.intersection_id).trim() : null;
   }
   if (payload.activa !== undefined) normalized.activa = Boolean(payload.activa);
+
+  // Soporte para campos extendidos que envía el Frontend
+  if (payload.titulo !== undefined) normalized.titulo = normalizeTrimmedString(payload.titulo, "titulo");
+  if (payload.subtitulo !== undefined) normalized.subtitulo = normalizeTrimmedString(payload.subtitulo, "subtitulo");
+  if (payload.description !== undefined) normalized.description = normalizeTrimmedString(payload.description, "description");
+
   if (payload.ubicacion !== undefined) {
     normalized.ubicacion = {
       lat: payload.ubicacion?.lat ?? null,
@@ -66,6 +75,11 @@ async function createAlert(req, res, next) {
       payload.activa = true;
       if (!payload.tipo || payload.tipo === "ambulance") payload.tipo = "ambulancia";
       if (!payload.prioridad) payload.prioridad = "alta";
+
+      // Si no hay mensaje pero hay título/descripción, los usamos como fallback
+      if (!payload.mensaje) {
+        payload.mensaje = payload.titulo || payload.description || "Alerta de emergencia";
+      }
     }
 
     // Garantizamos que el arreglo de leídos esté vacío al crear una nueva alerta
@@ -75,7 +89,6 @@ async function createAlert(req, res, next) {
 
     if (req.io) {
       // Emitimos la alerta mapeada para que el frontend la reciba con is_read: false inmediatamente
-      // Usamos el ID del usuario actual para el mapeo, pero como read_by está vacío, será false para todos.
       const alertData = mapAlertResponse(alert, req.currentUser._id);
       req.io.emit("alert-update", alert); // Evento técnico
       req.io.emit("nueva_alerta", alertData); // Evento de negocio
@@ -102,7 +115,6 @@ async function getAlerts(req, res, next) {
       query.activa = isActive;
 
       // Si se piden alertas activas (pendientes), por defecto excluimos las ya leídas por el usuario
-      // Esto es crucial para que el contador de notificaciones no vuelva a subir tras limpiar.
       if (isActive && userId && req.query.include_read !== 'true') {
         query.read_by = { $ne: userId };
       }
@@ -171,22 +183,14 @@ async function updateAlert(req, res, next) {
 
 /**
  * Marca todas las alertas como leídas para el usuario actual.
- * Esto asegura que el estado sea permanente en MongoDB usando el arreglo 'read_by'.
  */
 async function markAllAsRead(req, res, next) {
   try {
     const userId = req.currentUser._id;
-    console.log('[MSG-SERVER] Petición de lectura recibida del usuario:', userId);
-
-    // Actualización atómica: Agregamos al usuario al arreglo de 'quienes leyeron'
-    // de todas las alertas donde aún no figure.
     const result = await Alert.updateMany(
       { read_by: { $ne: userId } },
       { $addToSet: { read_by: userId } }
     );
-
-    console.log('[MSG-SERVER] Resultado de MongoDB (modifiedCount):', result.modifiedCount);
-    console.log('[MSG-SERVER] ¿Se actualizó el registro?:', result.acknowledged ? 'SÍ' : 'NO');
 
     sendSuccess(res, {
       message: "Todas las alertas han sido marcadas como leídas correctamente",
