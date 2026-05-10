@@ -44,14 +44,14 @@ async function activateSemaphoreOverride(req, res, next) {
       status: "active"
     });
 
-    // 3.1. Persistir Alerta en Base de Datos con descripción dinámica legible
+    // 3.1. Persistir Alerta en Base de Datos
     const descriptionText = `Prioridad activada en: ${light.name}`;
     const newAlert = await Alert.create({
       tipo: "ambulancia",
       titulo: "¡EMERGENCIA DETECTADA!",
       subtitulo: "Intersección: " + light.name,
       mensaje: descriptionText,
-      description: descriptionText, // Campo clave para Flutter
+      description: descriptionText,
       prioridad: "alta",
       intersection_id: intersection_id,
       ubicacion: {
@@ -70,20 +70,28 @@ async function activateSemaphoreOverride(req, res, next) {
         override_id: override._id
       });
 
-      // Estructura EXACTA para el Frontend de Flutter (incluyendo 'description' y contenido legible)
       const alertData = {
         id: newAlert._id.toString(),
         tipo: "ambulancia",
         titulo: "¡EMERGENCIA DETECTADA!",
         subtitulo: "Intersección: " + light.name,
         mensaje: descriptionText,
-        description: descriptionText, // Campo solicitado para compatibilidad
+        description: descriptionText,
         activa: true,
         prioridad: "high"
       };
 
       req.io.emit("nueva_alerta", alertData);
       console.log('✅ Alerta emitida con éxito:', alertData);
+
+      // 5. PROGRAMAR LIBERACIÓN AUTOMÁTICA (Para asegurar que el Admin limpie su mapa sin refrescar)
+      setTimeout(async () => {
+        try {
+          await expireOldOverrides(req.io);
+        } catch (err) {
+          console.error("Error en liberación automática diferida:", err);
+        }
+      }, (duration * 1000) + 1000);
     }
 
     sendSuccess(res, buildOverrideState(override), { message: "Prioridad activada correctamente" }, 201);
@@ -113,12 +121,13 @@ async function releaseSemaphoreOverride(req, res, next) {
     // Marcar alertas asociadas como inactivas
     await Alert.updateMany({ intersection_id: override.intersection_id, activa: true }, { activa: false });
 
+    // Emisión global para el Admin
     if (req.io) {
       req.io.emit("emergency-override-released", {
         intersection_id: override.intersection_id,
-        status: "NORMAL",
-        message: "Prioridad cancelada manualmente"
+        status: "NORMAL"
       });
+      console.log(`🔓 Prioridad liberada manualmente en: ${override.intersection_id}. Estado NORMAL emitido.`);
     }
 
     sendSuccess(res, { status: "released", intersection_id: override.intersection_id });
@@ -129,6 +138,10 @@ async function releaseSemaphoreOverride(req, res, next) {
 
 async function getRealtimeSemaphoreState(req, res, next) {
   try {
+    if (req.io) {
+      await expireOldOverrides(req.io);
+    }
+
     const lights = await TrafficLight.find({}).lean();
     const activeOverrides = await SemaphoreOverride.find({ status: "active" }).lean();
 
