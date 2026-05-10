@@ -168,6 +168,7 @@ async function updateAlert(req, res, next) {
 async function markAllAsRead(req, res, next) {
   try {
     const userId = req.currentUser._id;
+    console.log('[MSG-SERVER] Petición de lectura recibida del usuario:', userId);
 
     // Actualización atómica: Agregamos al usuario al arreglo de 'quienes leyeron'
     // de todas las alertas donde aún no figure.
@@ -176,7 +177,8 @@ async function markAllAsRead(req, res, next) {
       { $addToSet: { read_by: userId } }
     );
 
-    console.log(`✅ Alertas limpiadas permanentemente para usuario: ${userId}. Afectadas: ${result.modifiedCount}`);
+    console.log('[MSG-SERVER] Resultado de MongoDB (modifiedCount):', result.modifiedCount);
+    console.log('[MSG-SERVER] ¿Se actualizó el registro?:', result.acknowledged ? 'SÍ' : 'NO');
 
     sendSuccess(res, {
       message: "Todas las alertas han sido marcadas como leídas correctamente",
