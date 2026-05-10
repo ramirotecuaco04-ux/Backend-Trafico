@@ -63,6 +63,7 @@ async function createMessage(req, res, next) {
 
     if (req.io) {
       req.io.emit("operational-message", mapped);
+      req.io.emit("nuevo_mensaje", mapped); // Notificación instantánea para el Frontend
     }
 
     sendSuccess(res, mapped, { event_emitted: true }, 201);
@@ -81,10 +82,12 @@ async function getMessages(req, res, next) {
     const userId = req.currentUser._id;
 
     if (req.currentUser.rol === "admin") {
+      // Los administradores ven todos los mensajes o filtran por rol de destino
       if (req.query.to_role) {
         query.to_role = String(req.query.to_role).trim();
       }
     } else {
+      // Jerarquía: Vialidad solo ve lo que le corresponde
       query.$or = [
         { to_role: req.currentUser.rol },
         { to_user: userId },
@@ -92,7 +95,6 @@ async function getMessages(req, res, next) {
       ];
     }
 
-    // Filtrar solo no leídos si se solicita
     if (req.query.unread === "true") {
       query.read_by = { $ne: userId };
     }
@@ -152,7 +154,6 @@ async function markAllMessagesAsRead(req, res, next) {
     const userId = req.currentUser._id;
     const userRole = req.currentUser.rol;
 
-    // Buscamos mensajes dirigidos al usuario o a su rol que no hayan sido leídos
     const query = {
       $or: [
         { to_user: userId },
