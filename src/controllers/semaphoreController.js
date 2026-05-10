@@ -2,7 +2,7 @@ const SemaphoreOverride = require("../models/SemaphoreOverride");
 const Traffic = require("../models/Traffic");
 const TrafficLight = require("../models/TrafficLight");
 const Alert = require("../models/Alert");
-const { expireOldOverrides } = require("./dashboardController");
+const { expireOldOverrides, mapAlertForFrontend } = require("./dashboardController");
 const { createHttpError, sendSuccess } = require("../utils/http");
 
 function buildOverrideState(record) {
@@ -75,20 +75,16 @@ async function activateSemaphoreOverride(req, res, next) {
         override_id: override._id
       });
 
-      const alertData = {
-        id: newAlert._id.toString(),
-        tipo: "ambulancia",
-        titulo: "¡EMERGENCIA DETECTADA!",
-        subtitulo: "Intersección: " + light.name,
-        mensaje: descriptionText,
-        description: descriptionText,
-        activa: true,
-        prioridad: "high",
-        is_read: false // Importante: Informar explícitamente que es nueva
-      };
+      // Mapear la alerta exactamente como el Frontend la espera usando el mapper centralizado
+      const alertData = mapAlertForFrontend(newAlert, req.currentUser._id);
 
+      // Emitir el evento 'nueva_alerta' con el objeto persistido y mapeado
       req.io.emit("nueva_alerta", alertData);
-      console.log('✅ Alerta emitida con éxito:', alertData);
+
+      // Emitir también 'notification' por si el Frontend escucha este evento alternativo
+      req.io.emit("notification", alertData);
+
+      console.log('✅ Alerta emitida con éxito (nueva_alerta y notification):', alertData);
 
       // 5. PROGRAMAR LIBERACIÓN AUTOMÁTICA (Para asegurar que el Admin limpie su mapa sin refrescar)
       setTimeout(async () => {

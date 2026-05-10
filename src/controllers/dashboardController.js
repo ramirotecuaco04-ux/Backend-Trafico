@@ -65,16 +65,28 @@ async function expireOldOverrides(io) {
  * Genera dinámicamente titulo, subtitulo y description para evitar "Sin descripción".
  */
 function mapAlertForFrontend(alert, currentUserId = null) {
+  if (!alert) return null;
   const alertObj = alert.toObject ? alert.toObject() : alert;
   const description = alertObj.description || alertObj.mensaje || "Prioridad de paso activada";
 
   // Calculamos is_read basándonos en si el ID del usuario está en el arreglo read_by
-  // Si no hay currentUserId o no hay read_by, por defecto es false (no leída).
   const isRead = currentUserId && alertObj.read_by
     ? alertObj.read_by.some(id => String(id) === String(currentUserId))
     : false;
 
+  // Normalización de prioridad para el Frontend (Sincronizado con Flutter)
+  let prioridadMapped = "medium";
+  const p = String(alertObj.prioridad || "").toLowerCase();
+  if (p === "alta" || p === "high") {
+    prioridadMapped = "high";
+  } else if (p === "critica" || p === "critical") {
+    prioridadMapped = "critical";
+  } else if (p === "baja" || p === "low") {
+    prioridadMapped = "low";
+  }
+
   return {
+    _id: alertObj._id.toString(),
     id: alertObj._id.toString(),
     tipo: alertObj.tipo || "sistema",
     titulo: alertObj.titulo || (
@@ -83,11 +95,14 @@ function mapAlertForFrontend(alert, currentUserId = null) {
     ),
     subtitulo: alertObj.subtitulo || (alertObj.intersection_id ? "Intersección: " + alertObj.intersection_id : "Aviso General"),
     mensaje: alertObj.mensaje || description,
-    description: description, // Campo clave para el feed de Flutter (¡Evita 'Sin descripción'!)
-    prioridad: alertObj.prioridad === "alta" ? "high" : (alertObj.prioridad === "baja" ? "low" : "medium"),
+    description: description,
+    prioridad: prioridadMapped,
     activa: alertObj.activa !== undefined ? alertObj.activa : true,
     is_read: !!isRead,
-    timestamp: alertObj.createdAt
+    timestamp: alertObj.createdAt || alertObj.timestamp || new Date(),
+    createdAt: alertObj.createdAt || alertObj.timestamp || new Date(),
+    intersection_id: alertObj.intersection_id,
+    ubicacion: alertObj.ubicacion || null
   };
 }
 
@@ -367,6 +382,7 @@ async function getAmbulanciaDashboard(req, res, next) {
 
 module.exports = {
   expireOldOverrides,
+  mapAlertForFrontend,
   getAdminDashboard,
   getAmbulanciaDashboard,
   getVialidadDashboard
