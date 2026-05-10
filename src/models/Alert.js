@@ -21,8 +21,8 @@ const alertSchema = new mongoose.Schema({
   subtitulo: { type: String, trim: true, required: false },
   prioridad: {
     type: String,
-    enum: ["baja", "media", "alta", "critica"],
-    default: "media",
+    enum: ["low", "medium", "high", "critical", "baja", "media", "alta", "critica"],
+    default: "medium",
     required: false
   },
   intersection_id: { type: String, trim: true, default: null, required: false },
