@@ -189,10 +189,11 @@ async function getAdminDashboard(req, res, next) {
       recentReports,
       users,
       heartbeats,
-      recentMessages
+      recentMessages,
+      totalUnreadAlerts
     ] = await Promise.all([
       Traffic.find({}).sort({ timestamp: -1 }).limit(20).lean(),
-      // Solo alertas no leídas por el usuario actual
+      // Muestra solo las 10 más recientes para la lista
       Alert.find({ activa: true, read_by: { $ne: userId } }).sort({ createdAt: -1 }).limit(10),
       SemaphoreOverride.find({ status: "active", expires_at: { $gt: new Date() } })
         .populate("triggered_by", "nombre rol")
@@ -204,7 +205,9 @@ async function getAdminDashboard(req, res, next) {
         .sort({ createdAt: -1 })
         .limit(10)
         .populate("from_user", "nombre rol")
-        .populate("to_user", "nombre rol")
+        .populate("to_user", "nombre rol"),
+      // Contador real sin límite (ESTO ES LO QUE EL FRONTEND NECESITA)
+      Alert.countDocuments({ activa: true, read_by: { $ne: userId } })
     ]);
 
     const intersections = await buildRealtimeIntersectionState();
@@ -213,7 +216,7 @@ async function getAdminDashboard(req, res, next) {
     sendSuccess(res, {
       totals: {
         intersections: intersections.length,
-        active_alerts: activeAlerts.length, // Refleja solo las no leídas
+        active_alerts: totalUnreadAlerts, // Conteo real y persistente
         active_overrides: activeOverrides.length,
         users: users.length,
         online_devices: onlineDevices,
@@ -250,8 +253,8 @@ async function getVialidadDashboard(req, res, next) {
     await expireOldOverrides(req.io);
     const currentUserId = req.currentUser._id;
 
-    const [activeAlerts, messages, ownReports, intersections] = await Promise.all([
-      // Solo alertas no leídas por el usuario actual
+    const [activeAlerts, messages, ownReports, intersections, totalUnreadAlerts] = await Promise.all([
+      // Lista de alerts recientes
       Alert.find({ activa: true, read_by: { $ne: currentUserId } }).sort({ createdAt: -1 }).limit(20),
       OperationalMessage.find({
         $or: [
@@ -274,7 +277,8 @@ async function getVialidadDashboard(req, res, next) {
         .sort({ createdAt: -1 })
         .limit(20)
         .populate("creado_por", "nombre rol"),
-      buildRealtimeIntersectionState()
+      buildRealtimeIntersectionState(),
+      Alert.countDocuments({ activa: true, read_by: { $ne: currentUserId } })
     ]);
 
     const unreadMessages = messages.filter((message) =>
@@ -290,7 +294,7 @@ async function getVialidadDashboard(req, res, next) {
         assigned_intersections: req.currentUser.assigned_intersections || []
       },
       counters: {
-        active_alerts: activeAlerts.length,
+        active_alerts: totalUnreadAlerts, // Conteo real y persistente
         unread_messages: unreadMessages,
         reports_visible: ownReports.length
       },
@@ -311,14 +315,15 @@ async function getAmbulanciaDashboard(req, res, next) {
     const userId = req.currentUser._id;
     const intersections = await buildRealtimeIntersectionState();
 
-    const [currentOverride, activeAlerts] = await Promise.all([
+    const [currentOverride, activeAlerts, totalUnreadAlerts] = await Promise.all([
       SemaphoreOverride.findOne({
         triggered_by: userId,
         status: "active",
         expires_at: { $gt: new Date() }
       }).sort({ createdAt: -1 }),
       // Solo alertas no leídas por el usuario actual
-      Alert.find({ activa: true, read_by: { $ne: userId } }).sort({ createdAt: -1 }).limit(5)
+      Alert.find({ activa: true, read_by: { $ne: userId } }).sort({ createdAt: -1 }).limit(5),
+      Alert.countDocuments({ activa: true, read_by: { $ne: userId } })
     ]);
 
     sendSuccess(res, {
@@ -331,7 +336,7 @@ async function getAmbulanciaDashboard(req, res, next) {
         assigned_intersections: req.currentUser.assigned_intersections || []
       },
       counters: {
-        active_alerts: activeAlerts.length
+        active_alerts: totalUnreadAlerts // Conteo real y persistente
       },
       active_alerts: activeAlerts.map(a => mapAlertForFrontend(a, userId)),
       current_override: currentOverride,

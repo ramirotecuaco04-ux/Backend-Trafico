@@ -11,48 +11,41 @@ const {
 } = require("../utils/validation");
 
 /**
- * Utilidad interna para mapear alertas incluyendo el estado de lectura para el usuario actual.
+ * Mapea la alerta para el cliente, calculando el estado de lectura y ocultando datos internos de DB.
+ * Garantiza que el Frontend reciba una bandera 'is_read' clara y permanente.
  */
 function mapAlertResponse(alert, userId) {
   const alertObj = alert.toObject ? alert.toObject() : alert;
+
+  // Calculamos is_read basándonos en si el ID del usuario está en el arreglo read_by
+  const is_read = userId ? (alertObj.read_by || []).some(id => String(id) === String(userId)) : false;
+
+  // Eliminamos el arreglo read_by para no exponer IDs de otros usuarios y mantener el JSON limpio
+  delete alertObj.read_by;
+
   return {
     ...alertObj,
-    is_read: userId ? alertObj.read_by?.some(id => String(id) === String(userId)) : false
+    is_read: !!is_read
   };
 }
 
 function normalizeAlertPayload(payload = {}, { partial = false } = {}) {
   const normalized = {};
-
   if (!partial || payload.mensaje !== undefined) {
     normalized.mensaje = normalizeTrimmedString(payload.mensaje, "mensaje", { required: true });
   }
-
-  if (payload.tipo !== undefined) {
-    normalized.tipo = String(payload.tipo).trim();
-  }
-
-  if (payload.prioridad !== undefined) {
-    normalized.prioridad = String(payload.prioridad).trim();
-  }
-
+  if (payload.tipo !== undefined) normalized.tipo = String(payload.tipo).trim();
+  if (payload.prioridad !== undefined) normalized.prioridad = String(payload.prioridad).trim();
   if (payload.intersection_id !== undefined) {
-    normalized.intersection_id = payload.intersection_id
-      ? String(payload.intersection_id).trim()
-      : null;
+    normalized.intersection_id = payload.intersection_id ? String(payload.intersection_id).trim() : null;
   }
-
-  if (payload.activa !== undefined) {
-    normalized.activa = Boolean(payload.activa);
-  }
-
+  if (payload.activa !== undefined) normalized.activa = Boolean(payload.activa);
   if (payload.ubicacion !== undefined) {
     normalized.ubicacion = {
       lat: payload.ubicacion?.lat ?? null,
       lng: payload.ubicacion?.lng ?? null
     };
   }
-
   return normalized;
 }
 
@@ -74,8 +67,10 @@ async function createAlert(req, res, next) {
     const alert = await Alert.create(payload);
 
     if (req.io) {
-      req.io.emit("alert-update", alert);
-      req.io.emit("nueva_alerta", mapAlertResponse(alert, req.currentUser._id));
+      // Emitimos la alerta mapeada para que el frontend la reciba con is_read: false inmediatamente
+      const alertData = mapAlertResponse(alert, req.currentUser._id);
+      req.io.emit("alert-update", alert); // Evento técnico
+      req.io.emit("nueva_alerta", alertData); // Evento de negocio
     }
 
     sendSuccess(res, mapAlertResponse(alert, req.currentUser._id), { event_emitted: true }, 201);
@@ -93,15 +88,21 @@ async function getAlerts(req, res, next) {
     const query = {};
     const userId = req.currentUser?._id;
 
+    // Filtro por estado activo (incidente en curso)
     if (req.query.activa !== undefined) {
       const isActive = normalizeBoolean(req.query.activa, "activa");
       query.activa = isActive;
 
-      // Si se piden alertas activas, filtramos las que ya leyó este usuario específico
-      // para que no cuenten como pendientes en el contador del frontend.
-      if (isActive && userId) {
+      // Si se piden alertas activas (pendientes), por defecto excluimos las ya leídas por el usuario
+      // Esto es crucial para que el contador de notificaciones no vuelva a subir tras limpiar.
+      if (isActive && userId && req.query.include_read !== 'true') {
         query.read_by = { $ne: userId };
       }
+    }
+
+    // Filtro explícito para alertas NO leídas (alias de utilidad)
+    if ((req.query.unread === "true" || req.query.only_unread === "true") && userId) {
+      query.read_by = { $ne: userId };
     }
 
     if (req.query.tipo) query.tipo = String(req.query.tipo).trim();
@@ -138,11 +139,7 @@ async function getAlertById(req, res, next) {
   try {
     validateObjectId(req.params.id, "alert id");
     const alert = await Alert.findById(req.params.id);
-
-    if (!alert) {
-      throw createHttpError("Alerta no encontrada", 404);
-    }
-
+    if (!alert) throw createHttpError("Alerta no encontrada", 404);
     sendSuccess(res, mapAlertResponse(alert, req.currentUser?._id));
   } catch (error) {
     next(error);
@@ -156,32 +153,35 @@ async function updateAlert(req, res, next) {
       normalizeAlertPayload(req.body, { partial: true }),
       { new: true, runValidators: true }
     );
-
-    if (!alert) {
-      throw createHttpError("Alerta no encontrada", 404);
-    }
-
-    if (req.io) {
-      req.io.emit("alert-update", alert);
-    }
-
+    if (!alert) throw createHttpError("Alerta no encontrada", 404);
+    if (req.io) req.io.emit("alert-update", alert);
     sendSuccess(res, mapAlertResponse(alert, req.currentUser?._id), { event_emitted: true });
   } catch (error) {
     next(error);
   }
 }
 
+/**
+ * Marca todas las alertas como leídas para el usuario actual.
+ * Esto asegura que el estado sea permanente en MongoDB usando el arreglo 'read_by'.
+ */
 async function markAllAsRead(req, res, next) {
   try {
     const userId = req.currentUser._id;
 
-    // Marcamos todas las alertas activas como leídas por este usuario
-    await Alert.updateMany(
-      { activa: true, read_by: { $ne: userId } },
+    // Actualización atómica: Agregamos al usuario al arreglo de 'quienes leyeron'
+    // de todas las alertas donde aún no figure.
+    const result = await Alert.updateMany(
+      { read_by: { $ne: userId } },
       { $addToSet: { read_by: userId } }
     );
 
-    sendSuccess(res, { message: "Todas las alertas marcadas como leídas" });
+    console.log(`✅ Alertas limpiadas permanentemente para usuario: ${userId}. Afectadas: ${result.modifiedCount}`);
+
+    sendSuccess(res, {
+      message: "Todas las alertas han sido marcadas como leídas correctamente",
+      modified_count: result.modifiedCount || 0
+    });
   } catch (error) {
     next(error);
   }
