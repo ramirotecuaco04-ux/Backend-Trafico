@@ -46,16 +46,19 @@ async function expireOldOverrides(io) {
 
 /**
  * Mapea una alerta del modelo de base de datos al formato esperado por el Frontend (Flutter)
- * Genera dinámicamente titulo y subtitulo para evitar notificaciones vacías.
+ * Genera dinámicamente titulo, subtitulo y description para evitar "Sin descripción".
  */
 function mapAlertForFrontend(alert) {
   const alertObj = alert.toObject ? alert.toObject() : alert;
+  const description = alertObj.description || alertObj.mensaje || "Prioridad de paso activada";
+
   return {
     id: alertObj._id.toString(),
     tipo: alertObj.tipo || "sistema",
-    titulo: alertObj.tipo === "ambulancia" ? "¡EMERGENCIA DETECTADA!" : "ALERTA DE SISTEMA",
-    subtitulo: alertObj.intersection_id ? "Intersección: " + alertObj.intersection_id : "Aviso General",
-    mensaje: alertObj.mensaje || "Prioridad de paso activada",
+    titulo: alertObj.titulo || (alertObj.tipo === "ambulancia" ? "¡EMERGENCIA DETECTADA!" : "ALERTA DE SISTEMA"),
+    subtitulo: alertObj.subtitulo || (alertObj.intersection_id ? "Intersección: " + alertObj.intersection_id : "Aviso General"),
+    mensaje: alertObj.mensaje || description,
+    description: description, // Campo clave para el feed de Flutter (¡Evita 'Sin descripción'!)
     prioridad: alertObj.prioridad === "alta" ? "high" : (alertObj.prioridad === "baja" ? "low" : "medium"),
     activa: alertObj.activa !== undefined ? alertObj.activa : true,
     timestamp: alertObj.createdAt
@@ -64,7 +67,7 @@ function mapAlertForFrontend(alert) {
 
 async function buildRealtimeIntersectionState() {
   // 1. Obtener todos los semáforos registrados (Infraestructura base)
-  // AJUSTE: Se mantiene find({}) sin filtros para asegurar visibilidad total en el mapa.
+  // Se mantiene find({}) sin filtros para asegurar visibilidad total en el mapa.
   const allLights = await TrafficLight.find({}).lean();
 
   // 2. Obtener el tráfico más reciente

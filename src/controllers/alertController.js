@@ -17,6 +17,10 @@ function normalizeAlertPayload(payload = {}, { partial = false } = {}) {
     normalized.mensaje = normalizeTrimmedString(payload.mensaje, "mensaje", { required: true });
   }
 
+  if (payload.description !== undefined) {
+    normalized.description = normalizeTrimmedString(payload.description, "description");
+  }
+
   if (payload.tipo !== undefined) {
     normalized.tipo = String(payload.tipo).trim();
   }
@@ -65,13 +69,10 @@ async function createAlert(req, res, next) {
 
     // Notificación vía WebSockets
     if (req.io) {
-      // Evento general de actualización
       req.io.emit("alert-update", alert);
-
-      // Evento específico para Admin y Vialidad según requerimiento
-      // Nota: Si el sistema de rooms por rol está implementado, se usaría .to("admin").to("vialidad")
       req.io.emit("nueva_alerta", {
         ...alert.toObject(),
+        description: alert.mensaje, // Asegurar compatibilidad en tiempo real
         created_by_role: req.currentUser.rol
       });
     }
@@ -174,9 +175,27 @@ async function updateAlert(req, res, next) {
   }
 }
 
+/**
+ * Marca todas las alertas como inactivas (leídas)
+ */
+async function markAllAsRead(req, res, next) {
+  try {
+    await Alert.updateMany({ activa: true }, { $set: { activa: false } });
+
+    if (req.io) {
+      req.io.emit("alerts-cleared", { by: req.currentUser.nombre });
+    }
+
+    sendSuccess(res, { message: "Todas las alertas han sido marcadas como leídas" });
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   createAlert,
   getAlertById,
   getAlerts,
-  updateAlert
+  updateAlert,
+  markAllAsRead
 };

@@ -3,15 +3,18 @@ const {
   createAlert,
   getAlertById,
   getAlerts,
-  updateAlert
+  updateAlert,
+  markAllAsRead
 } = require("../controllers/alertController");
-const { requireRole } = require("../middleware/auth");
+const { requireAuth, requireRole } = require("../middleware/auth");
 
 const router = express.Router();
 
-router.get("/", requireRole("admin", "vialidad", "ambulancia"), getAlerts);
-router.get("/:id", requireRole("admin", "vialidad", "ambulancia"), getAlertById);
-router.post("/", requireRole("admin", "vialidad", "ambulancia"), createAlert);
-router.patch("/:id", requireRole("admin"), updateAlert);
+// Rutas protegidas por autenticación y roles
+router.get("/", requireAuth, requireRole("admin", "vialidad", "ambulancia"), getAlerts);
+router.patch("/read-all", requireAuth, requireRole("admin", "vialidad"), markAllAsRead);
+router.get("/:id", requireAuth, requireRole("admin", "vialidad", "ambulancia"), getAlertById);
+router.post("/", requireAuth, requireRole("admin", "vialidad", "ambulancia"), createAlert);
+router.patch("/:id", requireAuth, requireRole("admin"), updateAlert);
 
 module.exports = router;

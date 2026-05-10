@@ -7,6 +7,9 @@ const alertSchema = new mongoose.Schema({
     default: "sistema"
   },
   mensaje: { type: String, required: true, trim: true },
+  description: { type: String, trim: true }, // Nuevo campo para compatibilidad con Flutter
+  titulo: { type: String, trim: true },      // Título explícito para el feed
+  subtitulo: { type: String, trim: true },   // Subtítulo explícito
   prioridad: {
     type: String,
     enum: ["baja", "media", "alta", "critica"],
@@ -17,7 +20,8 @@ const alertSchema = new mongoose.Schema({
     lat: Number,
     lng: Number
   },
-  activa: { type: Boolean, default: true }
+  activa: { type: Boolean, default: true },
+  read_by: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }] // Para rastreo de lectura
 }, { timestamps: true });
 
 module.exports = mongoose.model("Alert", alertSchema);

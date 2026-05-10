@@ -44,10 +44,14 @@ async function activateSemaphoreOverride(req, res, next) {
       status: "active"
     });
 
-    // 3.1. Persistir Alerta en Base de Datos con campo 'activa: true'
-    const alert = await Alert.create({
+    // 3.1. Persistir Alerta en Base de Datos con descripción dinámica legible
+    const descriptionText = `Prioridad activada en: ${light.name}`;
+    const newAlert = await Alert.create({
       tipo: "ambulancia",
-      mensaje: "Prioridad de paso activada por unidad de emergencia",
+      titulo: "¡EMERGENCIA DETECTADA!",
+      subtitulo: "Intersección: " + light.name,
+      mensaje: descriptionText,
+      description: descriptionText, // Campo clave para Flutter
       prioridad: "alta",
       intersection_id: intersection_id,
       ubicacion: {
@@ -66,13 +70,14 @@ async function activateSemaphoreOverride(req, res, next) {
         override_id: override._id
       });
 
-      // Estructura EXACTA para el Frontend de Flutter
+      // Estructura EXACTA para el Frontend de Flutter (incluyendo 'description' y contenido legible)
       const alertData = {
-        id: override._id.toString(), // Vinculamos con el ID del override
+        id: newAlert._id.toString(),
         tipo: "ambulancia",
         titulo: "¡EMERGENCIA DETECTADA!",
-        subtitulo: "Intersección: " + intersection_id,
-        mensaje: "Prioridad de paso activada por unidad de emergencia",
+        subtitulo: "Intersección: " + light.name,
+        mensaje: descriptionText,
+        description: descriptionText, // Campo solicitado para compatibilidad
         activa: true,
         prioridad: "high"
       };
@@ -105,7 +110,7 @@ async function releaseSemaphoreOverride(req, res, next) {
     override.release_reason = "manual_cancel_by_user";
     await override.save();
 
-    // 5. Marcar alertas asociadas como inactivas
+    // Marcar alertas asociadas como inactivas
     await Alert.updateMany({ intersection_id: override.intersection_id, activa: true }, { activa: false });
 
     if (req.io) {
